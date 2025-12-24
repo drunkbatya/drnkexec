@@ -10,20 +10,20 @@ import (
 	"github.com/drunkbatya/drnkexec/internal/model"
 	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
 	"github.com/drunkbatya/drnkexec/internal/pinger"
+	"github.com/drunkbatya/drnkexec/internal/state"
 	"go.uber.org/zap"
 )
 
-// Scheduler is responsible for executing checks on schedule.
 type Scheduler struct {
 	logger *zap.SugaredLogger
 	client nrpeclient.Client
 	alerts *alerts.Manager
 	pinger pinger.Checker
+	state  *state.Manager
 }
 
-// NewScheduler builds a new Scheduler.
-func NewScheduler(logger *zap.SugaredLogger, client nrpeclient.Client, alerts *alerts.Manager, pinger pinger.Checker) *Scheduler {
-	return &Scheduler{logger: logger, client: client, alerts: alerts, pinger: pinger}
+func NewScheduler(logger *zap.SugaredLogger, client nrpeclient.Client, alerts *alerts.Manager, pinger pinger.Checker, state *state.Manager) *Scheduler {
+	return &Scheduler{logger: logger, client: client, alerts: alerts, pinger: pinger, state: state}
 }
 
 // Run starts background goroutines for every check assignment.
@@ -78,6 +78,13 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 	output := result.Output
 	if output == "" && err != nil {
 		output = err.Error()
+	}
+	statusForState := result.Status
+	if err != nil && statusForState == nrpeclient.StatusOK {
+		statusForState = nrpeclient.StatusUnknown
+	}
+	if s.state != nil {
+		s.state.Update(assignment, statusForState, output)
 	}
 
 	if success {

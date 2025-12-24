@@ -19,6 +19,8 @@ const (
 	defaultMinFailBeforeAlert      = 1
 	defaultMinSuccessBeforeResolve = 1
 	defaultExecutionTimeoutSec     = 10
+	defaultHTTPHost                = "0.0.0.0"
+	defaultHTTPPort                = 8080
 )
 
 // Load reads the YAML config from disk, applies defaults and builds lookup maps.
@@ -33,6 +35,7 @@ func Load(path string) (*model.Config, error) {
 		Hosts        []model.HostConfig       `yaml:"hosts"`
 		Checks       []model.CheckConfig      `yaml:"checks"`
 		Defaults     model.CheckDefaults      `yaml:"defaults"`
+		HTTP         model.HTTPConfig         `yaml:"http"`
 	}{}
 
 	if err := yaml.Unmarshal(raw, &diskCfg); err != nil {
@@ -41,6 +44,7 @@ func Load(path string) (*model.Config, error) {
 
 	applyDefaultSection(&diskCfg.Defaults)
 	applyAlertDefaults(&diskCfg.AlertManager)
+	applyHTTPDefaults(&diskCfg.HTTP)
 	injectPingChecks(&diskCfg.Checks, diskCfg.Hosts, diskCfg.Defaults)
 	applyCheckDefaults(diskCfg.Checks, diskCfg.Defaults)
 
@@ -49,6 +53,7 @@ func Load(path string) (*model.Config, error) {
 		Hosts:        diskCfg.Hosts,
 		Checks:       diskCfg.Checks,
 		Defaults:     diskCfg.Defaults,
+		HTTP:         diskCfg.HTTP,
 	}
 
 	if err := compileMaps(cfg); err != nil {
@@ -80,6 +85,15 @@ func applyAlertDefaults(cfg *model.AlertManagerConfig) {
 	}
 	for i := range cfg.Notifiers {
 		cfg.Notifiers[i] = strings.ToLower(cfg.Notifiers[i])
+	}
+}
+
+func applyHTTPDefaults(cfg *model.HTTPConfig) {
+	if cfg.Host == "" {
+		cfg.Host = defaultHTTPHost
+	}
+	if cfg.Port == 0 {
+		cfg.Port = defaultHTTPPort
 	}
 }
 
@@ -163,7 +177,7 @@ func injectPingChecks(checks *[]model.CheckConfig, hosts []model.HostConfig, def
 			continue
 		}
 		pingCheck := model.CheckConfig{
-			Name:                    fmt.Sprintf("ping:%s", host.Hostname),
+			Name:                    "Ping",
 			Command:                 "builtin_ping",
 			Type:                    model.CheckTypePing,
 			MatchHosts:              []string{host.Hostname},
@@ -180,7 +194,6 @@ func injectPingChecks(checks *[]model.CheckConfig, hosts []model.HostConfig, def
 
 func compileMaps(cfg *model.Config) error {
 	lookup := model.LookupMaps{
-		CheckByCheckName:   make(map[string]*model.CheckConfig, len(cfg.Checks)),
 		ChecksByCheckLabel: make(map[string][]*model.CheckConfig),
 		ChecksByHostname:   make(map[string][]*model.CheckConfig, len(cfg.Hosts)),
 		HostByHostName:     make(map[string]*model.HostConfig, len(cfg.Hosts)),
@@ -188,10 +201,6 @@ func compileMaps(cfg *model.Config) error {
 
 	for i := range cfg.Checks {
 		check := &cfg.Checks[i]
-		if _, exists := lookup.CheckByCheckName[check.Name]; exists {
-			return fmt.Errorf("duplicate check name %s", check.Name)
-		}
-		lookup.CheckByCheckName[check.Name] = check
 		if check.AnyHost {
 			lookup.AnyHostChecks = append(lookup.AnyHostChecks, check)
 		}
@@ -247,6 +256,9 @@ func compileMaps(cfg *model.Config) error {
 }
 
 func validateConfig(cfg *model.Config) error {
+	if cfg.HTTP.Port <= 0 {
+		return fmt.Errorf("http port must be positive")
+	}
 	if err := validateAlertManager(&cfg.AlertManager); err != nil {
 		return err
 	}

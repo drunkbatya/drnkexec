@@ -9,10 +9,12 @@ import (
 
 	"github.com/drunkbatya/drnkexec/internal/alerts"
 	"github.com/drunkbatya/drnkexec/internal/config"
+	"github.com/drunkbatya/drnkexec/internal/httpserver"
 	"github.com/drunkbatya/drnkexec/internal/model"
 	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
 	"github.com/drunkbatya/drnkexec/internal/pinger"
 	"github.com/drunkbatya/drnkexec/internal/scheduler"
+	"github.com/drunkbatya/drnkexec/internal/state"
 	"go.uber.org/zap"
 )
 
@@ -40,8 +42,14 @@ func main() {
 
 	nrpeClient := nrpeclient.NewClient(sugar)
 	pingChecker := pinger.NewChecker(sugar)
-
-	sched := scheduler.NewScheduler(sugar, nrpeClient, alertManager, pingChecker)
+	stateManager := state.NewManager(cfg)
+	sched := scheduler.NewScheduler(sugar, nrpeClient, alertManager, pingChecker, stateManager)
+	apiServer := httpserver.New(cfg.HTTP, stateManager, sugar)
+	go func() {
+		if err := apiServer.Start(ctx); err != nil {
+			sugar.Fatalf("http server error: %v", err)
+		}
+	}()
 	sugar.Infof("drnkexec started checks=%d", len(cfg.LookupMaps.CheckAssignments))
 
 	sched.Run(ctx, cfg)

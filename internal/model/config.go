@@ -6,6 +6,7 @@ type Config struct {
 	Hosts        []HostConfig
 	Checks       []CheckConfig
 	Defaults     CheckDefaults
+	HTTP         HTTPConfig
 	LookupMaps   LookupMaps
 }
 
@@ -63,9 +64,13 @@ type CheckDefaults struct {
 	ExecutionTimeoutSec     int `yaml:"execution_timeout_sec"`
 }
 
+type HTTPConfig struct {
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+}
+
 // LookupMaps houses helper maps for fast lookup during scheduling.
 type LookupMaps struct {
-	CheckByCheckName   map[string]*CheckConfig
 	ChecksByCheckLabel map[string][]*CheckConfig
 	ChecksByHostname   map[string][]*CheckConfig
 	HostByHostName     map[string]*HostConfig
