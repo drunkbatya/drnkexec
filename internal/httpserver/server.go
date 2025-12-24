@@ -160,11 +160,37 @@ func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		s.handleDowntimeCreate(w, r)
+	case http.MethodDelete:
+		s.handleDowntimeDelete(w, r)
 	case http.MethodGet:
 		s.handleDowntimeList(w, r)
 	default:
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (s *Server) handleDowntimeDelete(w http.ResponseWriter, r *http.Request) {
+	var req downtimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.Name == "" {
+		s.writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if req.HostName == "" && req.CheckName != "" {
+		s.writeError(w, http.StatusBadRequest, "host_name is required when check_name is provided")
+		return
+	}
+	removed := s.downtime.Remove(req.HostName, req.CheckName, req.Name)
+	if !removed {
+		s.writeError(w, http.StatusNotFound, "downtime not found")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, struct {
+		Removed string `json:"removed"`
+	}{Removed: req.Name})
 }
 
 func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {

@@ -72,6 +72,14 @@ func TestHandleDowntimeLifecycle(t *testing.T) {
 	if len(resp.Items) != 1 || resp.Items[0].Name != "maint" {
 		t.Fatalf("unexpected downtime response %+v", resp)
 	}
+
+	delBody := bytes.NewBufferString(`{"name":"maint","host_name":"alpha"}`)
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/check/downtime", delBody)
+	srv.handleDowntime(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d on delete", rr.Code)
+	}
 }
 
 func newTestServer(t *testing.T) (*Server, model.CheckAssignment) {

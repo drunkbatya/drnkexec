@@ -22,6 +22,21 @@ type Manager struct {
 	hostEntries map[string]map[string]Entry
 }
 
+func (m *Manager) Remove(host, check, name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch {
+	case host == "" && check == "":
+		return m.removeGlobalLocked(name)
+	case host != "" && check == "":
+		return m.removeHostLocked(host, name)
+	case host != "" && check != "":
+		return m.removeCheckLocked(host, check, name)
+	default:
+		return false
+	}
+}
+
 func NewManager() *Manager {
 	return &Manager{entries: make(map[string]map[string]Entry), hostEntries: make(map[string]map[string]Entry)}
 }
@@ -243,4 +258,50 @@ func (m *Manager) addGlobalLocked(name string, from, to time.Time) (Entry, error
 	entry := Entry{Name: name, HostName: "", CheckName: "", From: from, To: to, CreatedAt: time.Now()}
 	bucket[name] = entry
 	return entry, nil
+}
+
+func (m *Manager) removeCheckLocked(host, check, name string) bool {
+	key := buildKey(host, check)
+	bucket, ok := m.entries[key]
+	if !ok {
+		return false
+	}
+	if _, ok := bucket[name]; !ok {
+		return false
+	}
+	delete(bucket, name)
+	if len(bucket) == 0 {
+		delete(m.entries, key)
+	}
+	return true
+}
+
+func (m *Manager) removeHostLocked(host, name string) bool {
+	bucket, ok := m.hostEntries[host]
+	if !ok {
+		return false
+	}
+	if _, ok := bucket[name]; !ok {
+		return false
+	}
+	delete(bucket, name)
+	if len(bucket) == 0 {
+		delete(m.hostEntries, host)
+	}
+	return true
+}
+
+func (m *Manager) removeGlobalLocked(name string) bool {
+	bucket, ok := m.entries["::"]
+	if !ok {
+		return false
+	}
+	if _, ok := bucket[name]; !ok {
+		return false
+	}
+	delete(bucket, name)
+	if len(bucket) == 0 {
+		delete(m.entries, "::")
+	}
+	return true
 }
