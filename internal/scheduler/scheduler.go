@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/alerts"
+	"github.com/drunkbatya/drnkexec/internal/downtime"
 	"github.com/drunkbatya/drnkexec/internal/model"
 	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
 	"github.com/drunkbatya/drnkexec/internal/pinger"
@@ -15,15 +16,16 @@ import (
 )
 
 type Scheduler struct {
-	logger *zap.SugaredLogger
-	client nrpeclient.Client
-	alerts *alerts.Manager
-	pinger pinger.Checker
-	state  *state.Manager
+	logger   *zap.SugaredLogger
+	client   nrpeclient.Client
+	alerts   *alerts.Manager
+	pinger   pinger.Checker
+	state    *state.Manager
+	downtime *downtime.Manager
 }
 
-func NewScheduler(logger *zap.SugaredLogger, client nrpeclient.Client, alerts *alerts.Manager, pinger pinger.Checker, state *state.Manager) *Scheduler {
-	return &Scheduler{logger: logger, client: client, alerts: alerts, pinger: pinger, state: state}
+func NewScheduler(logger *zap.SugaredLogger, client nrpeclient.Client, alerts *alerts.Manager, pinger pinger.Checker, state *state.Manager, downtime *downtime.Manager) *Scheduler {
+	return &Scheduler{logger: logger, client: client, alerts: alerts, pinger: pinger, state: state, downtime: downtime}
 }
 
 // Run starts background goroutines for every check assignment.
@@ -69,6 +71,10 @@ func (s *Scheduler) runAssignment(ctx context.Context, assignment model.CheckAss
 }
 
 func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssignment, state *assignmentState) time.Duration {
+	if s.inDowntime(assignment) {
+		s.logger.Infof("downtime active, skipping execution host=%s check=%s", assignment.Host.Hostname, assignment.Check.Name)
+		return secondsToDuration(assignment.Check.CheckIntervalSec)
+	}
 	timeout := secondsToDuration(assignment.Check.ExecutionTimeoutSec)
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -92,8 +98,12 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 		state.consecutiveFailures = 0
 		s.logger.Debugf("check ok host=%s check=%s output=%s", assignment.Host.Hostname, assignment.Check.Name, output)
 		if state.alertActive && state.consecutiveSuccess >= assignment.Check.MinSuccessBeforeResolve {
-			s.alerts.Resolve(ctx, assignment, output)
-			state.alertActive = false
+			if !s.inDowntime(assignment) {
+				s.alerts.Resolve(ctx, assignment, output)
+				state.alertActive = false
+			} else {
+				s.logger.Infof("check resolve suppressed due to downtime host=%s check=%s", assignment.Host.Hostname, assignment.Check.Name)
+			}
 		}
 		return secondsToDuration(assignment.Check.CheckIntervalSec)
 	}
@@ -106,12 +116,23 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 		return secondsToDuration(assignment.Check.RetryIntervalSec)
 	}
 
+	if s.inDowntime(assignment) {
+		s.logger.Infof("alert suppressed due to downtime host=%s check=%s", assignment.Host.Hostname, assignment.Check.Name)
+		return secondsToDuration(assignment.Check.RepeatAlertIntervalSec)
+	}
 	if !state.alertActive {
 		state.alertActive = true
 	}
 	s.alerts.Alert(ctx, assignment, output)
 
 	return secondsToDuration(assignment.Check.RepeatAlertIntervalSec)
+}
+
+func (s *Scheduler) inDowntime(assignment model.CheckAssignment) bool {
+	if s.downtime == nil {
+		return false
+	}
+	return s.downtime.Active(assignment.Host.Hostname, assignment.Check.Name, time.Now())
 }
 
 func (s *Scheduler) execute(ctx context.Context, assignment model.CheckAssignment) (nrpeclient.Result, error) {

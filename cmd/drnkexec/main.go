@@ -9,6 +9,7 @@ import (
 
 	"github.com/drunkbatya/drnkexec/internal/alerts"
 	"github.com/drunkbatya/drnkexec/internal/config"
+	"github.com/drunkbatya/drnkexec/internal/downtime"
 	"github.com/drunkbatya/drnkexec/internal/httpserver"
 	"github.com/drunkbatya/drnkexec/internal/model"
 	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
@@ -43,8 +44,9 @@ func main() {
 	nrpeClient := nrpeclient.NewClient(sugar)
 	pingChecker := pinger.NewChecker(sugar)
 	stateManager := state.NewManager(cfg)
-	sched := scheduler.NewScheduler(sugar, nrpeClient, alertManager, pingChecker, stateManager)
-	apiServer := httpserver.New(cfg.HTTP, stateManager, sugar)
+	downtimeManager := downtime.NewManager()
+	sched := scheduler.NewScheduler(sugar, nrpeClient, alertManager, pingChecker, stateManager, downtimeManager)
+	apiServer := httpserver.New(cfg.HTTP, stateManager, downtimeManager, sugar)
 	go func() {
 		if err := apiServer.Start(ctx); err != nil {
 			sugar.Fatalf("http server error: %v", err)

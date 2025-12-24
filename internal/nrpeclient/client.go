@@ -1,20 +1,21 @@
 package nrpeclient
 
 import (
-	"bytes"
 	"context"
-	"fmt"
+	"encoding/binary"
+	"errors"
+	"io"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/model"
-	"github.com/drunkbatya/drnkexec/internal/osutil"
+	"github.com/drunkbatya/drnkexec/internal/nrpe/protocol"
+	"github.com/drunkbatya/drnkexec/internal/nrpe/tlsdial"
 	"go.uber.org/zap"
 )
 
-// Status represents NRPE status codes.
 type Status int
 
 const (
@@ -24,94 +25,97 @@ const (
 	StatusUnknown
 )
 
-const (
-	defaultCheckNRPEBinary = "check_nrpe"
-	checkNRPEBinaryEnv     = "DRNKEXEC_CHECK_NRPE_PATH"
-)
-
-// Result describes an execution result.
 type Result struct {
 	Output string
 	Status Status
 }
 
-// Client executes remote checks.
 type Client interface {
 	Execute(ctx context.Context, host *model.HostConfig, check *model.CheckConfig) (Result, error)
 }
 
-// NewClient returns an NRPE client that shells out to check_nrpe binary.
-func NewClient(logger *zap.SugaredLogger) Client {
-	binary := os.Getenv(checkNRPEBinaryEnv)
-	if binary == "" {
-		binary = defaultCheckNRPEBinary
-	}
-	return &client{logger: logger, binary: binary}
-}
-
 type client struct {
 	logger *zap.SugaredLogger
-	binary string
+	dialer *net.Dialer
 }
 
-// Execute runs check_nrpe with parameters derived from host and check config.
+func NewClient(logger *zap.SugaredLogger) Client {
+	return &client{logger: logger, dialer: &net.Dialer{}}
+}
+
 func (c *client) Execute(ctx context.Context, host *model.HostConfig, check *model.CheckConfig) (Result, error) {
-	targetHost, targetPort := normalizeAddress(host)
-
-	args := []string{"-H", targetHost, "-p", targetPort, "-c", check.Command}
-	if check.ExecutionTimeoutSec > 0 {
-		args = append(args, "-t", fmt.Sprintf("%d", check.ExecutionTimeoutSec))
-	}
-	if len(check.Arguments) > 0 {
-		args = append(args, "-a")
-		args = append(args, check.Arguments...)
-	}
-
-	cmd := exec.CommandContext(ctx, c.binary, args...)
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-
-	err := cmd.Run()
-	exitCode, execErr := osutil.ExitCodeFromError(err)
-	if execErr != nil {
-
-		return Result{}, fmt.Errorf("check_nrpe failed: %w; stderr: %s", execErr, strings.TrimSpace(stderrBuf.String()))
-	}
-
-	status := convertStatus(exitCode)
-	output := strings.TrimSpace(stdoutBuf.String())
-	if output == "" {
-		output = strings.TrimSpace(stderrBuf.String())
-	}
-
-	c.logger.Debugf("nrpe executed host=%s check=%s status=%d output=%s", host.Hostname, check.Name, status, output)
-	return Result{Output: output, Status: status}, nil
-}
-
-func normalizeAddress(host *model.HostConfig) (string, string) {
 	target := host.Hostname
 	if host.ResolveTo != "" {
 		target = host.ResolveTo
 	}
-	port := "5666"
-	if h, p, err := net.SplitHostPort(target); err == nil {
-		target = h
-		port = p
+	if _, _, err := net.SplitHostPort(target); err != nil {
+		target = net.JoinHostPort(target, "5666")
 	}
-	return target, port
+	conn, err := c.dialNRPE(ctx, target)
+	if err != nil {
+		return Result{}, err
+	}
+	defer conn.Close()
+	timeout := time.Duration(check.ExecutionTimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return Result{}, err
+	}
+	raw, err := protocol.BuildRequest(check.Command, check.Arguments)
+	if err != nil {
+		return Result{}, err
+	}
+	if _, err := conn.Write(raw); err != nil {
+		return Result{}, err
+	}
+	parsed, err := c.readResponse(conn)
+	if err != nil {
+		return Result{}, err
+	}
+	output := protocol.PayloadString(parsed)
+	status := mapStatus(parsed.Result)
+	c.logger.Debugf("nrpe executed host=%s check=%s status=%d output=%s", host.Hostname, check.Name, status, output)
+	return Result{Output: output, Status: status}, nil
 }
 
-func convertStatus(code int) Status {
-	switch code {
-	case 0:
+func (c *client) dialNRPE(ctx context.Context, target string) (net.Conn, error) {
+	if strings.ToLower(os.Getenv("DRNKEXEC_NRPE_DISABLE_TLS")) == "1" {
+		return c.dialer.DialContext(ctx, "tcp", target)
+	}
+	conn, err := tlsdial.Dial(ctx, target, 0)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+func (c *client) readResponse(conn net.Conn) (protocol.Packet, error) {
+	header := make([]byte, protocol.HeaderLength())
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return protocol.Packet{}, err
+	}
+	bufferLen := int(binary.BigEndian.Uint32(header[12:16]))
+	if bufferLen <= 0 {
+		return protocol.Packet{}, errors.New("invalid buffer length")
+	}
+	rest := make([]byte, bufferLen)
+	if _, err := io.ReadFull(conn, rest); err != nil {
+		return protocol.Packet{}, err
+	}
+	packetBytes := append(header, rest...)
+	return protocol.ParseResponse(packetBytes)
+}
+
+func mapStatus(s protocol.Status) Status {
+	switch s {
+	case protocol.StatusOK:
 		return StatusOK
-	case 1:
+	case protocol.StatusWarning:
 		return StatusWarning
-	case 2:
+	case protocol.StatusCritical:
 		return StatusCritical
-	case 3:
-		return StatusUnknown
 	default:
 		return StatusUnknown
 	}
