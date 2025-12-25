@@ -22,6 +22,10 @@ type Manager struct {
 	hostEntries map[string]map[string]Entry
 }
 
+func NewManager() *Manager {
+	return &Manager{entries: make(map[string]map[string]Entry), hostEntries: make(map[string]map[string]Entry)}
+}
+
 func (m *Manager) Remove(host, check, name string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -35,10 +39,6 @@ func (m *Manager) Remove(host, check, name string) bool {
 	default:
 		return false
 	}
-}
-
-func NewManager() *Manager {
-	return &Manager{entries: make(map[string]map[string]Entry), hostEntries: make(map[string]map[string]Entry)}
 }
 
 func (m *Manager) Add(host, check, name string, from, to time.Time) (Entry, error) {

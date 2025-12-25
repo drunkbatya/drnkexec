@@ -33,7 +33,7 @@ func Load(path string) (*model.Config, error) {
 		AlertManager model.AlertManagerConfig `yaml:"alertmanager"`
 		Hosts        []model.HostConfig       `yaml:"hosts"`
 		Checks       []model.CheckConfig      `yaml:"checks"`
-		Defaults     model.CheckDefaults      `yaml:"defaults"`
+		Defaults     model.Defaults           `yaml:"defaults"`
 		HTTP         model.HTTPConfig         `yaml:"http"`
 	}{}
 
@@ -41,12 +41,12 @@ func Load(path string) (*model.Config, error) {
 		return nil, wrapYAMLError(path, err)
 	}
 
-	applyDefaultSection(&diskCfg.Defaults)
+	applyDefaultsSection(&diskCfg.Defaults)
 	inheritAlertRepeatInterval(diskCfg.Defaults, &diskCfg.AlertManager)
 	applyAlertDefaults(&diskCfg.AlertManager)
 	applyHTTPDefaults(&diskCfg.HTTP)
-	injectPingChecks(&diskCfg.Checks, diskCfg.Hosts, diskCfg.Defaults)
-	applyCheckDefaults(diskCfg.Checks, diskCfg.Defaults)
+	injectPingChecks(&diskCfg.Checks, diskCfg.Hosts, diskCfg.Defaults.Scheduler)
+	applyCheckDefaults(diskCfg.Checks, diskCfg.Defaults.Scheduler)
 
 	cfg := &model.Config{
 		AlertManager: diskCfg.AlertManager,
@@ -90,7 +90,7 @@ func applyAlertDefaults(cfg *model.AlertManagerConfig) {
 	}
 }
 
-func inheritAlertRepeatInterval(def model.CheckDefaults, alert *model.AlertManagerConfig) {
+func inheritAlertRepeatInterval(def model.Defaults, alert *model.AlertManagerConfig) {
 	if alert.RepeatIntervalSec <= 0 {
 		alert.RepeatIntervalSec = def.AlertRepeatIntervalSec
 	}
@@ -113,24 +113,31 @@ func wrapYAMLError(path string, err error) error {
 	return fmt.Errorf("decode config %s: %w", path, err)
 }
 
-func applyDefaultSection(def *model.CheckDefaults) {
+func applyDefaultsSection(def *model.Defaults) {
 	if def.AlertRepeatIntervalSec <= 0 {
 		def.AlertRepeatIntervalSec = defaultAlertRepeatIntervalSec
 	}
-	if def.CheckIntervalSec <= 0 {
-		def.CheckIntervalSec = defaultCheckIntervalSec
+	if def.Nrpe.TLS.Enabled == nil {
+		def.Nrpe.TLS.Enabled = boolPtr(true)
 	}
-	if def.RetryIntervalSec <= 0 {
-		def.RetryIntervalSec = defaultRetryIntervalSec
+	applySchedulerDefaults(&def.Scheduler)
+}
+
+func applySchedulerDefaults(cfg *model.SchedulerConfig) {
+	if cfg.CheckIntervalSec <= 0 {
+		cfg.CheckIntervalSec = defaultCheckIntervalSec
 	}
-	if def.MinFailBeforeAlert <= 0 {
-		def.MinFailBeforeAlert = defaultMinFailBeforeAlert
+	if cfg.RetryIntervalSec <= 0 {
+		cfg.RetryIntervalSec = defaultRetryIntervalSec
 	}
-	if def.MinSuccessBeforeResolve <= 0 {
-		def.MinSuccessBeforeResolve = defaultMinSuccessBeforeResolve
+	if cfg.MinFailBeforeAlert <= 0 {
+		cfg.MinFailBeforeAlert = defaultMinFailBeforeAlert
 	}
-	if def.ExecutionTimeoutSec <= 0 {
-		def.ExecutionTimeoutSec = defaultExecutionTimeoutSec
+	if cfg.MinSuccessBeforeResolve <= 0 {
+		cfg.MinSuccessBeforeResolve = defaultMinSuccessBeforeResolve
+	}
+	if cfg.ExecutionTimeoutSec <= 0 {
+		cfg.ExecutionTimeoutSec = defaultExecutionTimeoutSec
 	}
 }
 
@@ -149,31 +156,31 @@ func validateAlertManager(cfg *model.AlertManagerConfig) error {
 	return nil
 }
 
-func applyCheckDefaults(checks []model.CheckConfig, def model.CheckDefaults) {
+func applyCheckDefaults(checks []model.CheckConfig, sched model.SchedulerConfig) {
 	for i := range checks {
 		check := &checks[i]
 		if check.Type == "" {
 			check.Type = model.CheckTypeNRPE
 		}
 		if check.CheckIntervalSec <= 0 {
-			check.CheckIntervalSec = def.CheckIntervalSec
+			check.CheckIntervalSec = sched.CheckIntervalSec
 		}
 		if check.RetryIntervalSec <= 0 {
-			check.RetryIntervalSec = def.RetryIntervalSec
+			check.RetryIntervalSec = sched.RetryIntervalSec
 		}
 		if check.MinFailBeforeAlert <= 0 {
-			check.MinFailBeforeAlert = def.MinFailBeforeAlert
+			check.MinFailBeforeAlert = sched.MinFailBeforeAlert
 		}
 		if check.MinSuccessBeforeResolve <= 0 {
-			check.MinSuccessBeforeResolve = def.MinSuccessBeforeResolve
+			check.MinSuccessBeforeResolve = sched.MinSuccessBeforeResolve
 		}
 		if check.ExecutionTimeoutSec <= 0 {
-			check.ExecutionTimeoutSec = def.ExecutionTimeoutSec
+			check.ExecutionTimeoutSec = sched.ExecutionTimeoutSec
 		}
 	}
 }
 
-func injectPingChecks(checks *[]model.CheckConfig, hosts []model.HostConfig, def model.CheckDefaults) {
+func injectPingChecks(checks *[]model.CheckConfig, hosts []model.HostConfig, sched model.SchedulerConfig) {
 	for _, host := range hosts {
 		if !host.CheckPing {
 			continue
@@ -183,11 +190,11 @@ func injectPingChecks(checks *[]model.CheckConfig, hosts []model.HostConfig, def
 			Command:                 "builtin_ping",
 			Type:                    model.CheckTypePing,
 			MatchHosts:              []string{host.Hostname},
-			ExecutionTimeoutSec:     def.ExecutionTimeoutSec,
-			CheckIntervalSec:        def.CheckIntervalSec,
-			RetryIntervalSec:        def.RetryIntervalSec,
-			MinFailBeforeAlert:      def.MinFailBeforeAlert,
-			MinSuccessBeforeResolve: def.MinSuccessBeforeResolve,
+			ExecutionTimeoutSec:     sched.ExecutionTimeoutSec,
+			CheckIntervalSec:        sched.CheckIntervalSec,
+			RetryIntervalSec:        sched.RetryIntervalSec,
+			MinFailBeforeAlert:      sched.MinFailBeforeAlert,
+			MinSuccessBeforeResolve: sched.MinSuccessBeforeResolve,
 		}
 		*checks = append(*checks, pingCheck)
 	}
@@ -215,6 +222,9 @@ func compileMaps(cfg *model.Config) error {
 
 	for i := range cfg.Hosts {
 		host := &cfg.Hosts[i]
+		if host.Nrpe.TLS.Enabled == nil {
+			host.Nrpe.TLS.Enabled = boolPtr(*cfg.Defaults.Nrpe.TLS.Enabled)
+		}
 		if host.Hostname == "" {
 			return fmt.Errorf("host entry %s is missing hostname", host.Name)
 		}
@@ -254,6 +264,11 @@ func compileMaps(cfg *model.Config) error {
 
 	cfg.LookupMaps = lookup
 	return nil
+}
+
+func boolPtr(v bool) *bool {
+	b := v
+	return &b
 }
 
 func validateConfig(cfg *model.Config) error {

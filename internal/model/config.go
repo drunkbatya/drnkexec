@@ -5,7 +5,7 @@ type Config struct {
 	AlertManager AlertManagerConfig
 	Hosts        []HostConfig
 	Checks       []CheckConfig
-	Defaults     CheckDefaults
+	Defaults     Defaults
 	HTTP         HTTPConfig
 	LookupMaps   LookupMaps
 }
@@ -33,8 +33,35 @@ type HostConfig struct {
 	Name      string   `yaml:"name"`
 	Hostname  string   `yaml:"hostname"`
 	ResolveTo string   `yaml:"resolve_to"`
-	CheckPing bool     `yaml:"check_pind"`
+	CheckPing bool     `yaml:"check_ping"`
 	Labels    []string `yaml:"labels"`
+	Nrpe      HostNrpe `yaml:"nrpe"`
+}
+
+type HostNrpe struct {
+	TLS NrpeTLSConfig `yaml:"tls"`
+}
+
+type NrpeTLSConfig struct {
+	Enabled *bool `yaml:"enabled"`
+}
+
+type Defaults struct {
+	AlertRepeatIntervalSec int             `yaml:"alert_repeat_interval_sec"`
+	Nrpe                   DefaultsNrpe    `yaml:"nrpe"`
+	Scheduler              SchedulerConfig `yaml:"scheduler"`
+}
+
+type DefaultsNrpe struct {
+	TLS NrpeTLSConfig `yaml:"tls"`
+}
+
+type SchedulerConfig struct {
+	CheckIntervalSec        int `yaml:"check_interval_sec"`
+	RetryIntervalSec        int `yaml:"retry_interval_sec"`
+	MinFailBeforeAlert      int `yaml:"min_fail_before_alert"`
+	MinSuccessBeforeResolve int `yaml:"min_success_before_resolved"`
+	ExecutionTimeoutSec     int `yaml:"execution_timeout_sec"`
 }
 
 // CheckConfig represents a single NRPE check definition.
@@ -51,16 +78,6 @@ type CheckConfig struct {
 	RetryIntervalSec        int      `yaml:"retry_interval_sec"`
 	MinFailBeforeAlert      int      `yaml:"min_fail_before_alert"`
 	MinSuccessBeforeResolve int      `yaml:"min_success_before_resolved"`
-}
-
-// CheckDefaults is the defaults section of the YAML.
-type CheckDefaults struct {
-	AlertRepeatIntervalSec  int `yaml:"alert_repeat_interval_sec"`
-	CheckIntervalSec        int `yaml:"check_interval_sec"`
-	RetryIntervalSec        int `yaml:"retry_interval_sec"`
-	MinFailBeforeAlert      int `yaml:"min_fail_before_alert"`
-	MinSuccessBeforeResolve int `yaml:"min_success_before_resolved"`
-	ExecutionTimeoutSec     int `yaml:"execution_timeout_sec"`
 }
 
 type HTTPConfig struct {

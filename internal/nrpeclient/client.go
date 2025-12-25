@@ -6,8 +6,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/model"
@@ -51,7 +49,7 @@ func (c *client) Execute(ctx context.Context, host *model.HostConfig, check *mod
 	if _, _, err := net.SplitHostPort(target); err != nil {
 		target = net.JoinHostPort(target, "5666")
 	}
-	conn, err := c.dialNRPE(ctx, target)
+	conn, err := c.dialNRPE(ctx, host, target)
 	if err != nil {
 		return Result{}, err
 	}
@@ -80,8 +78,8 @@ func (c *client) Execute(ctx context.Context, host *model.HostConfig, check *mod
 	return Result{Output: output, Status: status}, nil
 }
 
-func (c *client) dialNRPE(ctx context.Context, target string) (net.Conn, error) {
-	if strings.ToLower(os.Getenv("DRNKEXEC_NRPE_DISABLE_TLS")) == "1" {
+func (c *client) dialNRPE(ctx context.Context, host *model.HostConfig, target string) (net.Conn, error) {
+	if !tlsEnabled(host) {
 		return c.dialer.DialContext(ctx, "tcp", target)
 	}
 	conn, err := tlsdial.Dial(ctx, target, 0)
@@ -89,6 +87,13 @@ func (c *client) dialNRPE(ctx context.Context, target string) (net.Conn, error) 
 		return nil, err
 	}
 	return conn, nil
+}
+
+func tlsEnabled(host *model.HostConfig) bool {
+	if host != nil && host.Nrpe.TLS.Enabled != nil {
+		return *host.Nrpe.TLS.Enabled
+	}
+	return true
 }
 
 func (c *client) readResponse(conn net.Conn) (protocol.Packet, error) {

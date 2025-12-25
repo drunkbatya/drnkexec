@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -148,6 +149,22 @@ type downtimeRequest struct {
 	Duration  *int64 `json:"duration"`
 }
 
+func (r downtimeRequest) timeRange(now time.Time) (time.Time, time.Time, error) {
+	if r.Duration != nil && *r.Duration > 0 {
+		start := now
+		return start, start.Add(time.Duration(*r.Duration) * time.Second), nil
+	}
+	if r.From != nil && r.To != nil {
+		start := time.Unix(*r.From, 0)
+		end := time.Unix(*r.To, 0)
+		if !end.After(start) {
+			return time.Time{}, time.Time{}, fmt.Errorf("to must be after from")
+		}
+		return start, end, nil
+	}
+	return time.Time{}, time.Time{}, errors.New("either duration or from/to must be provided")
+}
+
 type downtimeResponse struct {
 	Name      string `json:"name"`
 	HostName  string `json:"host_name"`
@@ -203,15 +220,9 @@ func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	var fromTime, toTime time.Time
-	if req.Duration != nil && *req.Duration > 0 {
-		fromTime = time.Now()
-		toTime = fromTime.Add(time.Duration(*req.Duration) * time.Second)
-	} else if req.From != nil && req.To != nil {
-		fromTime = time.Unix(*req.From, 0)
-		toTime = time.Unix(*req.To, 0)
-	} else {
-		s.writeError(w, http.StatusBadRequest, "either duration or from/to must be provided")
+	fromTime, toTime, err := req.timeRange(time.Now())
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	entry, err := s.downtime.Add(req.HostName, req.CheckName, req.Name, fromTime, toTime)
