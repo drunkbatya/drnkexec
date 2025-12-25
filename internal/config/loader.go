@@ -15,7 +15,6 @@ const (
 	defaultAlertRepeatIntervalSec  = 120
 	defaultCheckIntervalSec        = 60
 	defaultRetryIntervalSec        = 15
-	defaultRepeatAlertIntervalSec  = 60
 	defaultMinFailBeforeAlert      = 1
 	defaultMinSuccessBeforeResolve = 1
 	defaultExecutionTimeoutSec     = 10
@@ -43,6 +42,7 @@ func Load(path string) (*model.Config, error) {
 	}
 
 	applyDefaultSection(&diskCfg.Defaults)
+	inheritAlertRepeatInterval(diskCfg.Defaults, &diskCfg.AlertManager)
 	applyAlertDefaults(&diskCfg.AlertManager)
 	applyHTTPDefaults(&diskCfg.HTTP)
 	injectPingChecks(&diskCfg.Checks, diskCfg.Hosts, diskCfg.Defaults)
@@ -81,10 +81,18 @@ func readFile(path string) ([]byte, error) {
 func applyAlertDefaults(cfg *model.AlertManagerConfig) {
 	if len(cfg.Notifiers) == 0 {
 		cfg.Notifiers = []string{"log"}
-		return
 	}
 	for i := range cfg.Notifiers {
 		cfg.Notifiers[i] = strings.ToLower(cfg.Notifiers[i])
+	}
+	if cfg.RepeatIntervalSec <= 0 {
+		cfg.RepeatIntervalSec = defaultAlertRepeatIntervalSec
+	}
+}
+
+func inheritAlertRepeatInterval(def model.CheckDefaults, alert *model.AlertManagerConfig) {
+	if alert.RepeatIntervalSec <= 0 {
+		alert.RepeatIntervalSec = def.AlertRepeatIntervalSec
 	}
 }
 
@@ -114,9 +122,6 @@ func applyDefaultSection(def *model.CheckDefaults) {
 	}
 	if def.RetryIntervalSec <= 0 {
 		def.RetryIntervalSec = defaultRetryIntervalSec
-	}
-	if def.RepeatAlertIntervalSec <= 0 {
-		def.RepeatAlertIntervalSec = defaultRepeatAlertIntervalSec
 	}
 	if def.MinFailBeforeAlert <= 0 {
 		def.MinFailBeforeAlert = defaultMinFailBeforeAlert
@@ -156,9 +161,6 @@ func applyCheckDefaults(checks []model.CheckConfig, def model.CheckDefaults) {
 		if check.RetryIntervalSec <= 0 {
 			check.RetryIntervalSec = def.RetryIntervalSec
 		}
-		if check.RepeatAlertIntervalSec <= 0 {
-			check.RepeatAlertIntervalSec = def.RepeatAlertIntervalSec
-		}
 		if check.MinFailBeforeAlert <= 0 {
 			check.MinFailBeforeAlert = def.MinFailBeforeAlert
 		}
@@ -184,7 +186,6 @@ func injectPingChecks(checks *[]model.CheckConfig, hosts []model.HostConfig, def
 			ExecutionTimeoutSec:     def.ExecutionTimeoutSec,
 			CheckIntervalSec:        def.CheckIntervalSec,
 			RetryIntervalSec:        def.RetryIntervalSec,
-			RepeatAlertIntervalSec:  def.RepeatAlertIntervalSec,
 			MinFailBeforeAlert:      def.MinFailBeforeAlert,
 			MinSuccessBeforeResolve: def.MinSuccessBeforeResolve,
 		}

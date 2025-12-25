@@ -39,7 +39,7 @@ func main() {
 	defer cancel()
 
 	notifiers := buildNotifiers(cfg, sugar)
-	alertManager := alerts.NewManager(sugar, notifiers, time.Duration(cfg.Defaults.AlertRepeatIntervalSec)*time.Second)
+	alertManager := alerts.NewManager(sugar, notifiers, time.Duration(cfg.AlertManager.RepeatIntervalSec)*time.Second)
 
 	nrpeClient := nrpeclient.NewClient(sugar)
 	pingChecker := pinger.NewChecker(sugar)

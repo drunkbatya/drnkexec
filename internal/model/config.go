@@ -17,8 +17,9 @@ const (
 
 // AlertManagerConfig holds integration options.
 type AlertManagerConfig struct {
-	Notifiers []string       `yaml:"notifiers"`
-	Telegram  TelegramConfig `yaml:"telegram"`
+	Notifiers         []string       `yaml:"notifiers"`
+	Telegram          TelegramConfig `yaml:"telegram"`
+	RepeatIntervalSec int            `yaml:"repeat_interval_sec"`
 }
 
 // TelegramConfig is used for Telegram alerting options.
@@ -48,7 +49,6 @@ type CheckConfig struct {
 	ExecutionTimeoutSec     int      `yaml:"execution_timeout_sec"`
 	CheckIntervalSec        int      `yaml:"check_interval_sec"`
 	RetryIntervalSec        int      `yaml:"retry_interval_sec"`
-	RepeatAlertIntervalSec  int      `yaml:"repeat_alert_interval_sec"`
 	MinFailBeforeAlert      int      `yaml:"min_fail_before_alert"`
 	MinSuccessBeforeResolve int      `yaml:"min_success_before_resolved"`
 }
@@ -58,7 +58,6 @@ type CheckDefaults struct {
 	AlertRepeatIntervalSec  int `yaml:"alert_repeat_interval_sec"`
 	CheckIntervalSec        int `yaml:"check_interval_sec"`
 	RetryIntervalSec        int `yaml:"retry_interval_sec"`
-	RepeatAlertIntervalSec  int `yaml:"repeat_alert_interval_sec"`
 	MinFailBeforeAlert      int `yaml:"min_fail_before_alert"`
 	MinSuccessBeforeResolve int `yaml:"min_success_before_resolved"`
 	ExecutionTimeoutSec     int `yaml:"execution_timeout_sec"`

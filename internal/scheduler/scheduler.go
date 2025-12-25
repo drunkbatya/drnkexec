@@ -118,14 +118,14 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 
 	if s.inDowntime(assignment) {
 		s.logger.Infof("alert suppressed due to downtime host=%s check=%s", assignment.Host.Hostname, assignment.Check.Name)
-		return secondsToDuration(assignment.Check.RepeatAlertIntervalSec)
+		return secondsToDuration(assignment.Check.CheckIntervalSec)
 	}
 	if !state.alertActive {
 		state.alertActive = true
 	}
 	s.alerts.Alert(ctx, assignment, output)
 
-	return secondsToDuration(assignment.Check.RepeatAlertIntervalSec)
+	return secondsToDuration(assignment.Check.CheckIntervalSec)
 }
 
 func (s *Scheduler) inDowntime(assignment model.CheckAssignment) bool {
