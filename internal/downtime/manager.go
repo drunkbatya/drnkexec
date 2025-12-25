@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 type Entry struct {
@@ -20,10 +22,14 @@ type Manager struct {
 	mu          sync.RWMutex
 	entries     map[string]map[string]Entry
 	hostEntries map[string]map[string]Entry
+	logger      *zap.SugaredLogger
 }
 
-func NewManager() *Manager {
-	return &Manager{entries: make(map[string]map[string]Entry), hostEntries: make(map[string]map[string]Entry)}
+func NewManager(logger *zap.SugaredLogger) *Manager {
+	if logger == nil {
+		logger = zap.NewNop().Sugar()
+	}
+	return &Manager{entries: make(map[string]map[string]Entry), hostEntries: make(map[string]map[string]Entry), logger: logger}
 }
 
 func (m *Manager) Remove(host, check, name string) bool {
@@ -47,13 +53,19 @@ func (m *Manager) Add(host, check, name string, from, to time.Time) (Entry, erro
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var entry Entry
+	var err error
 	if host == "" {
-		return m.addGlobalLocked(name, from, to)
+		entry, err = m.addGlobalLocked(name, from, to)
+	} else if check == "" {
+		entry, err = m.addHostLocked(host, name, from, to)
+	} else {
+		entry, err = m.addCheckLocked(host, check, name, from, to)
 	}
-	if check == "" {
-		return m.addHostLocked(host, name, from, to)
+	if err == nil {
+		m.logDowntimeAdded(entry)
 	}
-	return m.addCheckLocked(host, check, name, from, to)
+	return entry, err
 }
 
 func (m *Manager) Active(host, check string, now time.Time) bool {
@@ -90,7 +102,7 @@ func (m *Manager) List(hostFilter, checkFilter, nameFilter string, now time.Time
 		}
 		for name, entry := range bucket {
 			if now.After(entry.To) {
-				delete(bucket, name)
+				m.expireEntry(bucket, name, entry)
 				continue
 			}
 			if matchesFilter(entry, hostFilter, checkFilter, nameFilter) {
@@ -104,7 +116,7 @@ func (m *Manager) List(hostFilter, checkFilter, nameFilter string, now time.Time
 	for host, bucket := range m.hostEntries {
 		for name, entry := range bucket {
 			if now.After(entry.To) {
-				delete(bucket, name)
+				m.expireEntry(bucket, name, entry)
 				continue
 			}
 			if matchesFilter(entry, hostFilter, checkFilter, nameFilter) {
@@ -115,13 +127,16 @@ func (m *Manager) List(hostFilter, checkFilter, nameFilter string, now time.Time
 			delete(m.hostEntries, host)
 		}
 	}
-	for name, entry := range m.entries["::"] {
-		if now.After(entry.To) {
-			delete(m.entries["::"], name)
+	if bucket := m.entries["::"]; bucket != nil {
+		for name, entry := range bucket {
+			if now.After(entry.To) {
+				m.expireEntry(bucket, name, entry)
+				continue
+			}
+			if matchesFilter(entry, hostFilter, checkFilter, nameFilter) {
+				result = append(result, entry)
+			}
 			continue
-		}
-		if matchesFilter(entry, hostFilter, checkFilter, nameFilter) {
-			result = append(result, entry)
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -161,7 +176,7 @@ func (m *Manager) hostActiveLocked(host string, now time.Time) bool {
 	active := false
 	for name, entry := range bucket {
 		if now.After(entry.To) {
-			delete(bucket, name)
+			m.expireEntry(bucket, name, entry)
 			continue
 		}
 		if !now.Before(entry.From) && now.Before(entry.To) {
@@ -183,7 +198,7 @@ func (m *Manager) checkActiveLocked(host, check string, now time.Time) bool {
 	active := false
 	for name, entry := range bucket {
 		if now.After(entry.To) {
-			delete(bucket, name)
+			m.expireEntry(bucket, name, entry)
 			continue
 		}
 		if !now.Before(entry.From) && now.Before(entry.To) {
@@ -204,7 +219,7 @@ func (m *Manager) globalActiveLocked(now time.Time) bool {
 	active := false
 	for name, entry := range bucket {
 		if now.After(entry.To) {
-			delete(bucket, name)
+			m.expireEntry(bucket, name, entry)
 			continue
 		}
 		if !now.Before(entry.From) && now.Before(entry.To) {
@@ -260,16 +275,31 @@ func (m *Manager) addGlobalLocked(name string, from, to time.Time) (Entry, error
 	return entry, nil
 }
 
+func (m *Manager) expireEntry(bucket map[string]Entry, name string, entry Entry) {
+	delete(bucket, name)
+	m.logger.Infof("downtime expired name=%s host=%s check=%s", entry.Name, entry.HostName, entry.CheckName)
+}
+
+func (m *Manager) logDowntimeAdded(entry Entry) {
+	m.logger.Infof("downtime added name=%s host=%s check=%s from=%s to=%s", entry.Name, entry.HostName, entry.CheckName, entry.From.Format(time.RFC3339), entry.To.Format(time.RFC3339))
+}
+
+func (m *Manager) logDowntimeRemoved(entry Entry) {
+	m.logger.Infof("downtime removed name=%s host=%s check=%s", entry.Name, entry.HostName, entry.CheckName)
+}
+
 func (m *Manager) removeCheckLocked(host, check, name string) bool {
 	key := buildKey(host, check)
 	bucket, ok := m.entries[key]
 	if !ok {
 		return false
 	}
-	if _, ok := bucket[name]; !ok {
+	entry, ok := bucket[name]
+	if !ok {
 		return false
 	}
 	delete(bucket, name)
+	m.logDowntimeRemoved(entry)
 	if len(bucket) == 0 {
 		delete(m.entries, key)
 	}
@@ -281,10 +311,12 @@ func (m *Manager) removeHostLocked(host, name string) bool {
 	if !ok {
 		return false
 	}
-	if _, ok := bucket[name]; !ok {
+	entry, ok := bucket[name]
+	if !ok {
 		return false
 	}
 	delete(bucket, name)
+	m.logDowntimeRemoved(entry)
 	if len(bucket) == 0 {
 		delete(m.hostEntries, host)
 	}
@@ -296,10 +328,12 @@ func (m *Manager) removeGlobalLocked(name string) bool {
 	if !ok {
 		return false
 	}
-	if _, ok := bucket[name]; !ok {
+	entry, ok := bucket[name]
+	if !ok {
 		return false
 	}
 	delete(bucket, name)
+	m.logDowntimeRemoved(entry)
 	if len(bucket) == 0 {
 		delete(m.entries, "::")
 	}

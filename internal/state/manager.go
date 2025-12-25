@@ -8,6 +8,7 @@ import (
 
 	"github.com/drunkbatya/drnkexec/internal/model"
 	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
+	"go.uber.org/zap"
 )
 
 type Status string
@@ -39,9 +40,10 @@ type Manager struct {
 	mu         sync.RWMutex
 	hostChecks map[string]map[string]*CheckInfo
 	hostOrder  []string
+	logger     *zap.SugaredLogger
 }
 
-func NewManager(cfg *model.Config) *Manager {
+func NewManager(logger *zap.SugaredLogger, cfg *model.Config) *Manager {
 	hostChecks := make(map[string]map[string]*CheckInfo, len(cfg.Hosts))
 	hostOrder := make([]string, 0, len(cfg.Hosts))
 	seenHosts := make(map[string]struct{}, len(cfg.Hosts))
@@ -68,7 +70,10 @@ func NewManager(cfg *model.Config) *Manager {
 		}
 	}
 	sort.Strings(hostOrder)
-	return &Manager{hostChecks: hostChecks, hostOrder: hostOrder}
+	if logger == nil {
+		logger = zap.NewNop().Sugar()
+	}
+	return &Manager{hostChecks: hostChecks, hostOrder: hostOrder, logger: logger}
 }
 
 func (m *Manager) Update(assignment model.CheckAssignment, status nrpeclient.Status, output string) {

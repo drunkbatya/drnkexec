@@ -23,36 +23,36 @@ func main() {
 	configPath := flag.String("config", "config.yaml", "Path to the YAML config file")
 	flag.Parse()
 
-	logger, err := zap.NewProduction()
+	zapLogger, err := zap.NewProduction()
 	if err != nil {
 		panic(err)
 	}
-	defer func() { _ = logger.Sync() }()
-	sugar := logger.Sugar()
+	defer func() { _ = zapLogger.Sync() }()
+	logger := zapLogger.Sugar()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		sugar.Fatalf("load config: %v", err)
+		logger.Fatalf("load config: %v", err)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	notifiers := buildNotifiers(cfg, sugar)
-	alertManager := alerts.NewManager(sugar, notifiers, time.Duration(cfg.AlertManager.RepeatIntervalSec)*time.Second)
+	notifiers := buildNotifiers(cfg, logger)
+	alertManager := alerts.NewManager(logger, notifiers, time.Duration(cfg.AlertManager.RepeatIntervalSec)*time.Second)
 
-	nrpeClient := nrpeclient.NewClient(sugar)
-	pingChecker := pinger.NewChecker(sugar)
-	stateManager := state.NewManager(cfg)
-	downtimeManager := downtime.NewManager()
-	sched := scheduler.NewScheduler(sugar, nrpeClient, alertManager, pingChecker, stateManager, downtimeManager)
-	apiServer := httpserver.New(cfg.HTTP, stateManager, downtimeManager, sugar)
+	nrpeClient := nrpeclient.NewClient(logger)
+	pingChecker := pinger.NewChecker(logger)
+	stateManager := state.NewManager(logger, cfg)
+	downtimeManager := downtime.NewManager(logger)
+	sched := scheduler.NewScheduler(logger, nrpeClient, alertManager, pingChecker, stateManager, downtimeManager)
+	apiServer := httpserver.New(cfg.HTTP, stateManager, downtimeManager, logger)
 	go func() {
 		if err := apiServer.Start(ctx); err != nil {
-			sugar.Fatalf("http server error: %v", err)
+			logger.Fatalf("http server error: %v", err)
 		}
 	}()
-	sugar.Infof("drnkexec started checks=%d", len(cfg.LookupMaps.CheckAssignments))
+	logger.Infof("drnkexec started checks=%d", len(cfg.LookupMaps.CheckAssignments))
 
 	sched.Run(ctx, cfg)
 }

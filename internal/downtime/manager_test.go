@@ -3,10 +3,13 @@ package downtime
 import (
 	"testing"
 	"time"
+
+	"go.uber.org/zap/zaptest"
 )
 
 func TestAddAndListScopes(t *testing.T) {
-	mgr := NewManager()
+	logger := zaptest.NewLogger(t).Sugar()
+	mgr := NewManager(logger)
 	now := time.Now()
 	if _, err := mgr.Add("host1", "check1", "c1", now.Add(-time.Minute), now.Add(time.Minute)); err != nil {
 		t.Fatalf("add check failed: %v", err)
@@ -33,7 +36,8 @@ func TestAddAndListScopes(t *testing.T) {
 }
 
 func TestRemoveEntries(t *testing.T) {
-	mgr := NewManager()
+	logger := zaptest.NewLogger(t).Sugar()
+	mgr := NewManager(logger)
 	now := time.Now()
 	_, _ = mgr.Add("", "", "global", now.Add(-time.Minute), now.Add(time.Minute))
 	_, _ = mgr.Add("host", "", "host", now.Add(-time.Minute), now.Add(time.Minute))

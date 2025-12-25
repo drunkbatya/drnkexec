@@ -89,8 +89,8 @@ func newTestServer(t *testing.T) (*Server, model.CheckAssignment) {
 		Checks: []model.CheckConfig{{Name: "svc"}},
 	}
 	cfg.LookupMaps.CheckAssignments = []model.CheckAssignment{{Host: &cfg.Hosts[0], Check: &cfg.Checks[0]}}
-	st := state.NewManager(cfg)
-	assignment := cfg.LookupMaps.CheckAssignments[0]
 	logger := zaptest.NewLogger(t).Sugar()
-	return &Server{state: st, downtime: downtime.NewManager(), logger: logger}, assignment
+	st := state.NewManager(logger, cfg)
+	assignment := cfg.LookupMaps.CheckAssignments[0]
+	return &Server{state: st, downtime: downtime.NewManager(logger), logger: logger}, assignment
 }

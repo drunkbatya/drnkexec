@@ -5,11 +5,13 @@ import (
 
 	"github.com/drunkbatya/drnkexec/internal/model"
 	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
+	"go.uber.org/zap/zaptest"
 )
 
 func TestManagerInitializationSeedsUnknownChecks(t *testing.T) {
 	cfg := testConfig()
-	m := NewManager(cfg)
+	logger := zaptest.NewLogger(t).Sugar()
+	m := NewManager(logger, cfg)
 
 	if summaries := m.HostSummaries(); len(summaries) != 2 {
 		t.Fatalf("expected 2 host summaries, got %d", len(summaries))
@@ -25,7 +27,8 @@ func TestManagerInitializationSeedsUnknownChecks(t *testing.T) {
 
 func TestManagerUpdateAndQueries(t *testing.T) {
 	cfg := testConfig()
-	m := NewManager(cfg)
+	logger := zaptest.NewLogger(t).Sugar()
+	m := NewManager(logger, cfg)
 	assignment := cfg.LookupMaps.CheckAssignments[0]
 	m.Update(assignment, nrpeclient.StatusWarning, " some output \n")
 
