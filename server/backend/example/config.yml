@@ -1,0 +1,36 @@
+alertmanager:
+  repeat_interval_sec: 10
+  notifiers:
+    - log
+  telegram:
+    bot_token: ""
+    chat_id: ""
+http:
+  host: 0.0.0.0
+  port: 8080
+hosts:
+  - name: GateWay
+    hostname: gw-01
+    resolve_to: 192.168.123.17
+    check_ping: true
+    labels:
+      - linux
+      - servers
+    nrpe:
+      tls:
+        enabled: true
+checks:
+  - name: Uname
+    command: check_uname
+    match_labels:
+      - linux
+defaults:
+  nrpe:
+    tls:
+      enabled: true
+  scheduler:
+    check_interval_sec: 10
+    retry_interval_sec: 5
+    min_fail_before_alert: 2
+    min_success_before_resolved: 2
+    execution_timeout_sec: 5
