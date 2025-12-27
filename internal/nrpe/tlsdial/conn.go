@@ -1,6 +1,8 @@
 package tlsdial
 
-// #cgo LDFLAGS: -lssl -lcrypto
+// #cgo darwin CFLAGS: -I/opt/homebrew/opt/openssl/include
+// #cgo darwin LDFLAGS: -lssl -lcrypto -L/opt/homebrew/opt/openssl/lib
+// #cgo linux LDFLAGS: -lssl -lcrypto
 // #include "tls_conn.h"
 // #include <stdlib.h>
 import "C"
