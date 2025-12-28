@@ -46,7 +46,7 @@ func main() {
 	stateManager := state.NewManager(logger, cfg)
 	downtimeManager := downtime.NewManager(logger)
 	sched := scheduler.NewScheduler(logger, nrpeClient, alertManager, pingChecker, stateManager, downtimeManager)
-	apiServer := httpserver.New(cfg.HTTP, stateManager, downtimeManager, logger)
+	apiServer := httpserver.New(cfg.HTTP, cfg.Admin, stateManager, downtimeManager, logger)
 	go func() {
 		if err := apiServer.Start(ctx); err != nil {
 			logger.Fatalf("http server error: %v", err)

@@ -8,6 +8,10 @@ alertmanager:
 http:
   host: 0.0.0.0
   port: 8080
+admin:
+  username: admin
+  password: change-me
+  session_ttl_sec: 86400
 hosts:
   - name: GateWay
     hostname: gw-01

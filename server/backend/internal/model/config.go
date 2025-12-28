@@ -7,6 +7,7 @@ type Config struct {
 	Checks       []CheckConfig
 	Defaults     Defaults
 	HTTP         HTTPConfig
+	Admin        AdminConfig
 	LookupMaps   LookupMaps
 }
 
@@ -83,6 +84,12 @@ type CheckConfig struct {
 type HTTPConfig struct {
 	Host string `yaml:"host"`
 	Port int    `yaml:"port"`
+}
+
+type AdminConfig struct {
+	Username   string `yaml:"username"`
+	Password   string `yaml:"password"`
+	SessionTTL int    `yaml:"session_ttl_sec"`
 }
 
 // LookupMaps houses helper maps for fast lookup during scheduling.

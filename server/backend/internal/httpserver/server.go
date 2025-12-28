@@ -11,17 +11,25 @@ import (
 	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/downtime"
+	"github.com/drunkbatya/drnkexec/internal/httpserver/session"
 	"github.com/drunkbatya/drnkexec/internal/model"
 	"github.com/drunkbatya/drnkexec/internal/state"
 	"go.uber.org/zap"
 )
 
 type Server struct {
-	addr     string
-	logger   *zap.SugaredLogger
-	state    *state.Manager
-	downtime *downtime.Manager
+	addr       string
+	logger     *zap.SugaredLogger
+	state      *state.Manager
+	downtime   *downtime.Manager
+	admin      model.AdminConfig
+	sessions   *session.Manager
+	sessionTTL time.Duration
 }
+
+const (
+	sessionCookieName = "drnkexec_session"
+)
 
 type responseHosts struct {
 	Hosts []state.HostSummary `json:"hosts"`
@@ -42,17 +50,41 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-func New(cfg model.HTTPConfig, state *state.Manager, downtime *downtime.Manager, logger *zap.SugaredLogger) *Server {
+type loginRequest struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
+
+type loginResponse struct {
+	Login string `json:"login"`
+}
+
+type logoutResponse struct {
+	LoggedOut bool `json:"logged_out"`
+}
+
+func New(cfg model.HTTPConfig, admin model.AdminConfig, state *state.Manager, downtime *downtime.Manager, logger *zap.SugaredLogger) *Server {
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	return &Server{addr: addr, logger: logger, state: state, downtime: downtime}
+	ttl := time.Duration(admin.SessionTTL) * time.Second
+	return &Server{
+		addr:       addr,
+		logger:     logger,
+		state:      state,
+		downtime:   downtime,
+		admin:      admin,
+		sessions:   session.NewManager(ttl),
+		sessionTTL: ttl,
+	}
 }
 
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/hosts", s.handleHosts)
-	mux.HandleFunc("/api/v1/checks", s.handleChecks)
-	mux.HandleFunc("/api/v1/check", s.handleCheck)
-	mux.HandleFunc("/api/v1/check/downtime", s.handleDowntime)
+	mux.HandleFunc("/api/v1/user/login", s.handleLogin)
+	mux.HandleFunc("/api/v1/user/logout", s.requireAuth(s.handleLogout))
+	mux.HandleFunc("/api/v1/admin/hosts", s.requireAuth(s.handleHosts))
+	mux.HandleFunc("/api/v1/admin/checks", s.requireAuth(s.handleChecks))
+	mux.HandleFunc("/api/v1/admin/check", s.requireAuth(s.handleCheck))
+	mux.HandleFunc("/api/v1/admin/check/downtime", s.requireAuth(s.handleDowntime))
 	srv := &http.Server{Addr: s.addr, Handler: mux}
 	go func() {
 		<-ctx.Done()
@@ -66,6 +98,46 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.Login == "" || req.Password == "" {
+		s.writeError(w, http.StatusBadRequest, "login and password are required")
+		return
+	}
+	if req.Login != s.admin.Username || req.Password != s.admin.Password {
+		s.writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	token, err := s.sessions.Create(req.Login)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to create session")
+		return
+	}
+	s.setSessionCookie(w, token)
+	s.writeJSON(w, http.StatusOK, loginResponse{Login: req.Login})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && cookie.Value != "" {
+		s.sessions.Delete(cookie.Value)
+	}
+	s.clearSessionCookie(w)
+	s.writeJSON(w, http.StatusOK, logoutResponse{LoggedOut: true})
 }
 
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +352,50 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, payload interface{
 
 func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 	s.writeJSON(w, status, errorResponse{Error: message})
+}
+
+func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie(sessionCookieName)
+		if err != nil || cookie.Value == "" {
+			s.clearSessionCookie(w)
+			s.writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if !s.sessions.Validate(cookie.Value) {
+			s.clearSessionCookie(w)
+			s.writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		s.setSessionCookie(w, cookie.Value)
+		next(w, r)
+	}
+}
+
+func (s *Server) setSessionCookie(w http.ResponseWriter, token string) {
+	expire := time.Now().Add(s.sessionTTL)
+	maxAge := int(s.sessionTTL / time.Second)
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Expires:  expire,
+		MaxAge:   maxAge,
+	})
+}
+
+func (s *Server) clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+	})
 }
 
 func parseInt(value string, fallback int) int {

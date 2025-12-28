@@ -82,6 +82,94 @@ func TestHandleDowntimeLifecycle(t *testing.T) {
 	}
 }
 
+func TestLoginAndAuthFlow(t *testing.T) {
+	srv, assignment := newTestServer(t)
+	srv.state.Update(assignment, nrpeclient.StatusOK, "up")
+	body := bytes.NewBufferString(`{"login":"admin","password":"secret"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", body)
+	loginRR := httptest.NewRecorder()
+	srv.handleLogin(loginRR, loginReq)
+	if loginRR.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d on login", loginRR.Code)
+	}
+	authCookie := sessionCookieFromRecorder(t, loginRR)
+
+	handler := srv.requireAuth(srv.handleHosts)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
+	req.AddCookie(authCookie)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected authorized request, got %d", rr.Code)
+	}
+}
+
+func TestProtectedEndpointRequiresAuth(t *testing.T) {
+	srv, _ := newTestServer(t)
+	handler := srv.requireAuth(srv.handleHosts)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for missing session, got %d", rr.Code)
+	}
+}
+
+func TestLoginRejectsInvalidCredentials(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := bytes.NewBufferString(`{"login":"admin","password":"bad"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", body)
+	rr := httptest.NewRecorder()
+	srv.handleLogin(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for invalid creds, got %d", rr.Code)
+	}
+}
+
+func TestLogoutClearsSession(t *testing.T) {
+	srv, assignment := newTestServer(t)
+	srv.state.Update(assignment, nrpeclient.StatusOK, "up")
+	body := bytes.NewBufferString(`{"login":"admin","password":"secret"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", body)
+	loginRR := httptest.NewRecorder()
+	srv.handleLogin(loginRR, loginReq)
+	if loginRR.Code != http.StatusOK {
+		t.Fatalf("unexpected login status %d", loginRR.Code)
+	}
+	sessionCookie := sessionCookieFromRecorder(t, loginRR)
+
+	logoutHandler := srv.requireAuth(srv.handleLogout)
+	logoutReq := httptest.NewRequest(http.MethodPost, "/api/v1/user/logout", nil)
+	logoutReq.AddCookie(sessionCookie)
+	logoutRR := httptest.NewRecorder()
+	logoutHandler(logoutRR, logoutReq)
+	if logoutRR.Code != http.StatusOK {
+		t.Fatalf("logout failed with status %d", logoutRR.Code)
+	}
+
+	protected := srv.requireAuth(srv.handleHosts)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
+	req.AddCookie(sessionCookie)
+	rr := httptest.NewRecorder()
+	protected(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected forbidden after logout, got %d", rr.Code)
+	}
+}
+
+func sessionCookieFromRecorder(t *testing.T, rr *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	resp := rr.Result()
+	defer resp.Body.Close()
+	for _, c := range resp.Cookies() {
+		if c.Name == sessionCookieName {
+			return c
+		}
+	}
+	t.Fatalf("session cookie missing")
+	return nil
+}
+
 func newTestServer(t *testing.T) (*Server, model.CheckAssignment) {
 	t.Helper()
 	cfg := &model.Config{
@@ -92,5 +180,8 @@ func newTestServer(t *testing.T) (*Server, model.CheckAssignment) {
 	logger := zaptest.NewLogger(t).Sugar()
 	st := state.NewManager(logger, cfg)
 	assignment := cfg.LookupMaps.CheckAssignments[0]
-	return &Server{state: st, downtime: downtime.NewManager(logger), logger: logger}, assignment
+	dt := downtime.NewManager(logger)
+	httpCfg := model.HTTPConfig{Host: "127.0.0.1", Port: 8080}
+	admin := model.AdminConfig{Username: "admin", Password: "secret", SessionTTL: 60}
+	return New(httpCfg, admin, st, dt, logger), assignment
 }

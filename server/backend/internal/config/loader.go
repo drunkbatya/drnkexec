@@ -20,6 +20,7 @@ const (
 	defaultExecutionTimeoutSec     = 10
 	defaultHTTPHost                = "0.0.0.0"
 	defaultHTTPPort                = 8080
+	defaultAdminSessionTTL         = 24 * 60 * 60
 )
 
 // Load reads the YAML config from disk, applies defaults and builds lookup maps.
@@ -35,6 +36,7 @@ func Load(path string) (*model.Config, error) {
 		Checks       []model.CheckConfig      `yaml:"checks"`
 		Defaults     model.Defaults           `yaml:"defaults"`
 		HTTP         model.HTTPConfig         `yaml:"http"`
+		Admin        model.AdminConfig        `yaml:"admin"`
 	}{}
 
 	if err := yaml.Unmarshal(raw, &diskCfg); err != nil {
@@ -45,6 +47,7 @@ func Load(path string) (*model.Config, error) {
 	inheritAlertRepeatInterval(diskCfg.Defaults, &diskCfg.AlertManager)
 	applyAlertDefaults(&diskCfg.AlertManager)
 	applyHTTPDefaults(&diskCfg.HTTP)
+	applyAdminDefaults(&diskCfg.Admin)
 	injectPingChecks(&diskCfg.Checks, diskCfg.Hosts, diskCfg.Defaults.Scheduler)
 	applyCheckDefaults(diskCfg.Checks, diskCfg.Defaults.Scheduler)
 
@@ -54,6 +57,7 @@ func Load(path string) (*model.Config, error) {
 		Checks:       diskCfg.Checks,
 		Defaults:     diskCfg.Defaults,
 		HTTP:         diskCfg.HTTP,
+		Admin:        diskCfg.Admin,
 	}
 
 	if err := compileMaps(cfg); err != nil {
@@ -102,6 +106,12 @@ func applyHTTPDefaults(cfg *model.HTTPConfig) {
 	}
 	if cfg.Port == 0 {
 		cfg.Port = defaultHTTPPort
+	}
+}
+
+func applyAdminDefaults(cfg *model.AdminConfig) {
+	if cfg.SessionTTL <= 0 {
+		cfg.SessionTTL = defaultAdminSessionTTL
 	}
 }
 
@@ -275,6 +285,9 @@ func validateConfig(cfg *model.Config) error {
 	if cfg.HTTP.Port <= 0 {
 		return fmt.Errorf("http port must be positive")
 	}
+	if err := validateAdmin(cfg.Admin); err != nil {
+		return err
+	}
 	if err := validateAlertManager(&cfg.AlertManager); err != nil {
 		return err
 	}
@@ -305,5 +318,18 @@ func validateConfig(cfg *model.Config) error {
 		}
 	}
 
+	return nil
+}
+
+func validateAdmin(admin model.AdminConfig) error {
+	if admin.Username == "" {
+		return fmt.Errorf("admin username is required")
+	}
+	if admin.Password == "" {
+		return fmt.Errorf("admin password is required")
+	}
+	if admin.SessionTTL <= 0 {
+		return fmt.Errorf("admin session ttl must be positive")
+	}
 	return nil
 }
