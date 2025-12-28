@@ -63,3 +63,26 @@ func TestSchedulerRunsWhenNoDowntime(t *testing.T) {
 		t.Fatalf("expected execute to run once")
 	}
 }
+
+func TestTriggerCheckSignalsChannel(t *testing.T) {
+	logger := zap.NewNop().Sugar()
+	sched := &Scheduler{
+		logger:   logger,
+		triggers: make(map[string]chan struct{}),
+	}
+	assignment := model.CheckAssignment{
+		Host:  &model.HostConfig{Hostname: "alpha"},
+		Check: &model.CheckConfig{Name: "svc"},
+	}
+	ch := make(chan struct{}, 1)
+	sched.registerTrigger(assignment, ch)
+	defer sched.unregisterTrigger(assignment)
+	if err := sched.TriggerCheck("alpha", "svc"); err != nil {
+		t.Fatalf("trigger failed: %v", err)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatalf("expected trigger signal")
+	}
+}

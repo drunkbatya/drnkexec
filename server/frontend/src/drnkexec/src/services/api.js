@@ -35,3 +35,32 @@ export async function login(login, password) {
 export async function logout() {
   await userApi.post("/logout");
 }
+
+export async function fetchHosts({ page, pageSize }) {
+  const res = await protectedApi.get("/hosts", {
+    params: {
+      page,
+      page_size: pageSize,
+    },
+  });
+  return res.data;
+}
+
+export async function fetchChecks({ page, pageSize, hostName, checkName }) {
+  const res = await protectedApi.get("/checks", {
+    params: {
+      page,
+      page_size: pageSize,
+      host_name: hostName,
+      check_name: checkName,
+    },
+  });
+  return res.data;
+}
+
+export async function triggerCheckNow(hostName, checkName) {
+  await protectedApi.post("/check/now", {
+    host_name: hostName,
+    check_name: checkName,
+  });
+}

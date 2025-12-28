@@ -1,47 +1,51 @@
 <template>
-  <q-page class="flex flex-center bg-grey-2">
-    <q-card class="q-pa-lg" style="width: 400px; max-width: 90vw">
-      <div class="text-h5 text-center q-mb-md">DrnkExec Login</div>
+  <q-layout view="hH lpR fF">
+    <q-page-container>
+      <q-page class="flex flex-center bg-grey-2">
+        <q-card class="q-pa-lg" style="width: 400px; max-width: 90vw">
+          <div class="text-h5 text-center q-mb-md">DrnkExec Login</div>
 
-      <q-form @submit.prevent="onSubmit">
-        <q-input
-          v-model="login"
-          label="Login"
-          outlined
-          dense
-          class="q-mb-md"
-          :disable="loading"
-        >
-          <template #prepend>
-            <q-icon name="person" />
-          </template>
-        </q-input>
+          <q-form @submit.prevent="onSubmit">
+            <q-input
+              v-model="login"
+              label="Login"
+              outlined
+              dense
+              class="q-mb-md"
+              :disable="loading"
+            >
+              <template #prepend>
+                <q-icon name="person" />
+              </template>
+            </q-input>
 
-        <q-input
-          v-model="password"
-          label="Password"
-          type="password"
-          outlined
-          dense
-          class="q-mb-md"
-          :disable="loading"
-        >
-          <template #prepend>
-            <q-icon name="lock" />
-          </template>
-        </q-input>
+            <q-input
+              v-model="password"
+              label="Password"
+              type="password"
+              outlined
+              dense
+              class="q-mb-md"
+              :disable="loading"
+            >
+              <template #prepend>
+                <q-icon name="lock" />
+              </template>
+            </q-input>
 
-        <q-btn
-          type="submit"
-          label="Login"
-          color="primary"
-          unelevated
-          class="full-width q-mt-sm"
-          :loading="loading"
-        />
-      </q-form>
-    </q-card>
-  </q-page>
+            <q-btn
+              type="submit"
+              label="Login"
+              color="primary"
+              unelevated
+              class="full-width q-mt-sm"
+              :loading="loading"
+            />
+          </q-form>
+        </q-card>
+      </q-page>
+    </q-page-container>
+  </q-layout>
 </template>
 
 <script setup>

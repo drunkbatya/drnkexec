@@ -30,7 +30,7 @@ func TestManagerUpdateAndQueries(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar()
 	m := NewManager(logger, cfg)
 	assignment := cfg.LookupMaps.CheckAssignments[0]
-	m.Update(assignment, nrpeclient.StatusWarning, " some output \n")
+	m.Update(assignment, nrpeclient.StatusWarning, " some output \n", 2)
 
 	info, ok := m.Check("alpha", "check-alpha")
 	if !ok {
@@ -41,6 +41,12 @@ func TestManagerUpdateAndQueries(t *testing.T) {
 	}
 	if info.Output != "some output" {
 		t.Fatalf("unexpected output %q", info.Output)
+	}
+	if info.FailCount != 2 {
+		t.Fatalf("expected fail count 2, got %d", info.FailCount)
+	}
+	if info.FailThreshold != assignment.Check.MinFailBeforeAlert {
+		t.Fatalf("expected fail threshold %d, got %d", assignment.Check.MinFailBeforeAlert, info.FailThreshold)
 	}
 
 	checks, ok := m.Checks("")
@@ -68,8 +74,8 @@ func testConfig() *model.Config {
 			{Name: "Beta", Hostname: "beta"},
 		},
 		Checks: []model.CheckConfig{
-			{Name: "check-alpha"},
-			{Name: "check-beta"},
+			{Name: "check-alpha", MinFailBeforeAlert: 3},
+			{Name: "check-beta", MinFailBeforeAlert: 2},
 		},
 	}
 	cfg.LookupMaps.CheckAssignments = []model.CheckAssignment{

@@ -16,16 +16,18 @@ import (
 )
 
 type Scheduler struct {
-	logger   *zap.SugaredLogger
-	client   nrpeclient.Client
-	alerts   *alerts.Manager
-	pinger   pinger.Checker
-	state    *state.Manager
-	downtime *downtime.Manager
+	logger    *zap.SugaredLogger
+	client    nrpeclient.Client
+	alerts    *alerts.Manager
+	pinger    pinger.Checker
+	state     *state.Manager
+	downtime  *downtime.Manager
+	triggerMu sync.RWMutex
+	triggers  map[string]chan struct{}
 }
 
 func NewScheduler(logger *zap.SugaredLogger, client nrpeclient.Client, alerts *alerts.Manager, pinger pinger.Checker, state *state.Manager, downtime *downtime.Manager) *Scheduler {
-	return &Scheduler{logger: logger, client: client, alerts: alerts, pinger: pinger, state: state, downtime: downtime}
+	return &Scheduler{logger: logger, client: client, alerts: alerts, pinger: pinger, state: state, downtime: downtime, triggers: make(map[string]chan struct{})}
 }
 
 // Run starts background goroutines for every check assignment.
@@ -33,10 +35,13 @@ func (s *Scheduler) Run(ctx context.Context, cfg *model.Config) {
 	var wg sync.WaitGroup
 	for _, assignment := range cfg.LookupMaps.CheckAssignments {
 		assign := assignment
+		triggerCh := make(chan struct{}, 1)
+		s.registerTrigger(assign, triggerCh)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.runAssignment(ctx, assign)
+			s.runAssignment(ctx, assign, triggerCh)
+			s.unregisterTrigger(assign)
 		}()
 	}
 
@@ -51,7 +56,7 @@ type assignmentState struct {
 	alertActive         bool
 }
 
-func (s *Scheduler) runAssignment(ctx context.Context, assignment model.CheckAssignment) {
+func (s *Scheduler) runAssignment(ctx context.Context, assignment model.CheckAssignment, trigger <-chan struct{}) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	state := &assignmentState{}
@@ -62,10 +67,10 @@ func (s *Scheduler) runAssignment(ctx context.Context, assignment model.CheckAss
 			return
 		case <-timer.C:
 			next := s.executeCheck(ctx, assignment, state)
-			if next <= 0 {
-				next = time.Duration(assignment.Check.CheckIntervalSec) * time.Second
-			}
-			timer.Reset(next)
+			s.resetTimer(timer, next, assignment.Check.CheckIntervalSec)
+		case <-trigger:
+			next := s.executeCheck(ctx, assignment, state)
+			s.resetTimer(timer, next, assignment.Check.CheckIntervalSec)
 		}
 	}
 }
@@ -89,13 +94,23 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 	if err != nil && statusForState == nrpeclient.StatusOK {
 		statusForState = nrpeclient.StatusUnknown
 	}
-	if s.state != nil {
-		s.state.Update(assignment, statusForState, output)
-	}
+
+	failCount := 0
 
 	if success {
 		state.consecutiveSuccess++
 		state.consecutiveFailures = 0
+	} else {
+		state.consecutiveFailures++
+		state.consecutiveSuccess = 0
+		failCount = state.consecutiveFailures
+	}
+
+	if s.state != nil {
+		s.state.Update(assignment, statusForState, output, failCount)
+	}
+
+	if success {
 		s.logger.Debugf("check ok host=%s check=%s output=%s", assignment.Host.Hostname, assignment.Check.Name, output)
 		if state.alertActive && state.consecutiveSuccess >= assignment.Check.MinSuccessBeforeResolve {
 			if !s.inDowntime(assignment) {
@@ -108,9 +123,7 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 		return secondsToDuration(assignment.Check.CheckIntervalSec)
 	}
 
-	state.consecutiveFailures++
-	state.consecutiveSuccess = 0
-	s.logger.Warnf("check failed host=%s check=%s output=%s error=%v", assignment.Host.Hostname, assignment.Check.Name, output, err)
+	s.logger.Warnf("check failed host=%s check=%s output=%s error=%v (failures=%d)", assignment.Host.Hostname, assignment.Check.Name, output, err, failCount)
 
 	if state.consecutiveFailures < assignment.Check.MinFailBeforeAlert {
 		return secondsToDuration(assignment.Check.RetryIntervalSec)
@@ -133,6 +146,21 @@ func (s *Scheduler) inDowntime(assignment model.CheckAssignment) bool {
 		return false
 	}
 	return s.downtime.Active(assignment.Host.Hostname, assignment.Check.Name, time.Now())
+}
+
+func (s *Scheduler) TriggerCheck(hostname, checkname string) error {
+	key := assignmentKey(hostname, checkname)
+	s.triggerMu.RLock()
+	ch, ok := s.triggers[key]
+	s.triggerMu.RUnlock()
+	if !ok {
+		return fmt.Errorf("check %s/%s not scheduled", hostname, checkname)
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 func (s *Scheduler) execute(ctx context.Context, assignment model.CheckAssignment) (nrpeclient.Result, error) {
@@ -162,4 +190,35 @@ func secondsToDuration(value int) time.Duration {
 		return time.Second
 	}
 	return time.Duration(value) * time.Second
+}
+
+func assignmentKey(hostname, checkname string) string {
+	return hostname + "\x00" + checkname
+}
+
+func (s *Scheduler) registerTrigger(assignment model.CheckAssignment, ch chan struct{}) {
+	key := assignmentKey(assignment.Host.Hostname, assignment.Check.Name)
+	s.triggerMu.Lock()
+	s.triggers[key] = ch
+	s.triggerMu.Unlock()
+}
+
+func (s *Scheduler) unregisterTrigger(assignment model.CheckAssignment) {
+	key := assignmentKey(assignment.Host.Hostname, assignment.Check.Name)
+	s.triggerMu.Lock()
+	delete(s.triggers, key)
+	s.triggerMu.Unlock()
+}
+
+func (s *Scheduler) resetTimer(timer *time.Timer, next time.Duration, fallback int) {
+	if next <= 0 {
+		next = time.Duration(fallback) * time.Second
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(next)
 }

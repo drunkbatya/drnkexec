@@ -25,6 +25,7 @@ type Server struct {
 	admin      model.AdminConfig
 	sessions   *session.Manager
 	sessionTTL time.Duration
+	runner     CheckRunner
 }
 
 const (
@@ -32,7 +33,10 @@ const (
 )
 
 type responseHosts struct {
-	Hosts []state.HostSummary `json:"hosts"`
+	Hosts    []state.HostSummary `json:"hosts"`
+	Page     int                 `json:"page"`
+	PageSize int                 `json:"page_size"`
+	Total    int                 `json:"total"`
 }
 
 type responseChecks struct {
@@ -50,6 +54,10 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
+type CheckRunner interface {
+	TriggerCheck(hostname, checkname string) error
+}
+
 type loginRequest struct {
 	Login    string `json:"login"`
 	Password string `json:"password"`
@@ -63,7 +71,12 @@ type logoutResponse struct {
 	LoggedOut bool `json:"logged_out"`
 }
 
-func New(cfg model.HTTPConfig, admin model.AdminConfig, state *state.Manager, downtime *downtime.Manager, logger *zap.SugaredLogger) *Server {
+type checkNowRequest struct {
+	HostName  string `json:"host_name"`
+	CheckName string `json:"check_name"`
+}
+
+func New(cfg model.HTTPConfig, admin model.AdminConfig, state *state.Manager, downtime *downtime.Manager, runner CheckRunner, logger *zap.SugaredLogger) *Server {
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	ttl := time.Duration(admin.SessionTTL) * time.Second
 	return &Server{
@@ -74,6 +87,7 @@ func New(cfg model.HTTPConfig, admin model.AdminConfig, state *state.Manager, do
 		admin:      admin,
 		sessions:   session.NewManager(ttl),
 		sessionTTL: ttl,
+		runner:     runner,
 	}
 }
 
@@ -85,6 +99,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/admin/checks", s.requireAuth(s.handleChecks))
 	mux.HandleFunc("/api/v1/admin/check", s.requireAuth(s.handleCheck))
 	mux.HandleFunc("/api/v1/admin/check/downtime", s.requireAuth(s.handleDowntime))
+	mux.HandleFunc("/api/v1/admin/check/now", s.requireAuth(s.handleCheckNow))
 	srv := &http.Server{Addr: s.addr, Handler: mux}
 	go func() {
 		<-ctx.Done()
@@ -140,12 +155,66 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, logoutResponse{LoggedOut: true})
 }
 
+func (s *Server) handleCheckNow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.runner == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "scheduler not available")
+		return
+	}
+	var req checkNowRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.HostName == "" || req.CheckName == "" {
+		s.writeError(w, http.StatusBadRequest, "host_name and check_name are required")
+		return
+	}
+	if err := s.runner.TriggerCheck(req.HostName, req.CheckName); err != nil {
+		s.writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusAccepted, struct {
+		Triggered bool `json:"triggered"`
+	}{Triggered: true})
+}
+
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	data := responseHosts{Hosts: s.state.HostSummaries()}
+	query := r.URL.Query()
+	page := parseInt(query.Get("page"), 1)
+	pageSize := parseInt(query.Get("page_size"), 20)
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	all := s.state.HostSummaries()
+	total := len(all)
+	maxPage := (total + pageSize - 1) / pageSize
+	if maxPage == 0 {
+		maxPage = 1
+	}
+	if page > maxPage {
+		page = maxPage
+	}
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	items := all[start:end]
+	data := responseHosts{Hosts: items, Page: page, PageSize: pageSize, Total: total}
 	s.writeJSON(w, http.StatusOK, data)
 }
 

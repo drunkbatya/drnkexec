@@ -21,11 +21,13 @@ const (
 )
 
 type CheckInfo struct {
-	Hostname  string
-	CheckName string
-	Status    Status
-	Output    string
-	UpdatedAt time.Time
+	Hostname      string
+	CheckName     string
+	Status        Status
+	Output        string
+	UpdatedAt     time.Time
+	FailCount     int
+	FailThreshold int
 }
 
 type HostSummary struct {
@@ -64,9 +66,10 @@ func NewManager(logger *zap.SugaredLogger, cfg *model.Config) *Manager {
 			}
 		}
 		hostChecks[host][assignment.Check.Name] = &CheckInfo{
-			Hostname:  host,
-			CheckName: assignment.Check.Name,
-			Status:    StatusUnknown,
+			Hostname:      host,
+			CheckName:     assignment.Check.Name,
+			Status:        StatusUnknown,
+			FailThreshold: assignment.Check.MinFailBeforeAlert,
 		}
 	}
 	sort.Strings(hostOrder)
@@ -76,7 +79,7 @@ func NewManager(logger *zap.SugaredLogger, cfg *model.Config) *Manager {
 	return &Manager{hostChecks: hostChecks, hostOrder: hostOrder, logger: logger}
 }
 
-func (m *Manager) Update(assignment model.CheckAssignment, status nrpeclient.Status, output string) {
+func (m *Manager) Update(assignment model.CheckAssignment, status nrpeclient.Status, output string, failCount int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	hostname := assignment.Host.Hostname
@@ -94,6 +97,8 @@ func (m *Manager) Update(assignment model.CheckAssignment, status nrpeclient.Sta
 	info.Status = mapStatus(status)
 	info.Output = strings.TrimSpace(output)
 	info.UpdatedAt = time.Now()
+	info.FailCount = failCount
+	info.FailThreshold = assignment.Check.MinFailBeforeAlert
 }
 
 func (m *Manager) HostSummaries() []HostSummary {

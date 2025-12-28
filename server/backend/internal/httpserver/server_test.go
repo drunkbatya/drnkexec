@@ -3,6 +3,7 @@ package httpserver
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,12 +15,26 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
+type stubRunner struct {
+	host  string
+	check string
+	err   error
+	calls int
+}
+
+func (s *stubRunner) TriggerCheck(hostname, checkname string) error {
+	s.host = hostname
+	s.check = checkname
+	s.calls++
+	return s.err
+}
+
 func TestHandleHostsAndChecks(t *testing.T) {
-	srv, assignment := newTestServer(t)
-	srv.state.Update(assignment, nrpeclient.StatusOK, "up")
+	srv, assignment, _ := newTestServer(t)
+	srv.state.Update(assignment, nrpeclient.StatusOK, "up", 0)
 
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/hosts", nil)
 	srv.handleHosts(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d", rr.Code)
@@ -28,19 +43,19 @@ func TestHandleHostsAndChecks(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&hosts); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(hosts.Hosts) != 1 || hosts.Hosts[0].Hostname != "alpha" {
+	if len(hosts.Hosts) != 1 || hosts.Hosts[0].Hostname != "alpha" || hosts.Page != 1 || hosts.PageSize <= 0 || hosts.Total != 1 {
 		t.Fatalf("unexpected hosts %+v", hosts)
 	}
 
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/checks?host_name=missing", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/checks?host_name=missing", nil)
 	srv.handleChecks(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing host")
 	}
 
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/check?host_name=alpha&check_name=svc", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/check?host_name=alpha&check_name=svc", nil)
 	srv.handleCheck(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d", rr.Code)
@@ -48,17 +63,17 @@ func TestHandleHostsAndChecks(t *testing.T) {
 }
 
 func TestHandleDowntimeLifecycle(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	body := bytes.NewBufferString(`{"name":"maint","host_name":"alpha","duration":5}`)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/check/downtime", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/check/downtime", body)
 	srv.handleDowntime(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("unexpected status %d", rr.Code)
 	}
 
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/check/downtime", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/check/downtime", nil)
 	srv.handleDowntime(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d", rr.Code)
@@ -75,16 +90,55 @@ func TestHandleDowntimeLifecycle(t *testing.T) {
 
 	delBody := bytes.NewBufferString(`{"name":"maint","host_name":"alpha"}`)
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/check/downtime", delBody)
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/admin/check/downtime", delBody)
 	srv.handleDowntime(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d on delete", rr.Code)
 	}
 }
 
+func TestHandleCheckNowSuccess(t *testing.T) {
+	srv, _, runner := newTestServer(t)
+	body := bytes.NewBufferString(`{"host_name":"alpha","check_name":"svc"}`)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/check/now", body)
+	srv.handleCheckNow(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("unexpected status %d", rr.Code)
+	}
+	if runner.calls != 1 || runner.host != "alpha" || runner.check != "svc" {
+		t.Fatalf("runner was not triggered correctly: %+v", runner)
+	}
+}
+
+func TestHandleCheckNowValidation(t *testing.T) {
+	srv, _, runner := newTestServer(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/check/now", bytes.NewBufferString(`{}`))
+	srv.handleCheckNow(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner should not be called on validation error")
+	}
+}
+
+func TestHandleCheckNowError(t *testing.T) {
+	srv, _, runner := newTestServer(t)
+	runner.err = errors.New("missing")
+	body := bytes.NewBufferString(`{"host_name":"alpha","check_name":"svc"}`)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/check/now", body)
+	srv.handleCheckNow(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+}
+
 func TestLoginAndAuthFlow(t *testing.T) {
-	srv, assignment := newTestServer(t)
-	srv.state.Update(assignment, nrpeclient.StatusOK, "up")
+	srv, assignment, _ := newTestServer(t)
+	srv.state.Update(assignment, nrpeclient.StatusOK, "up", 0)
 	body := bytes.NewBufferString(`{"login":"admin","password":"secret"}`)
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", body)
 	loginRR := httptest.NewRecorder()
@@ -105,7 +159,7 @@ func TestLoginAndAuthFlow(t *testing.T) {
 }
 
 func TestProtectedEndpointRequiresAuth(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	handler := srv.requireAuth(srv.handleHosts)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
 	rr := httptest.NewRecorder()
@@ -116,7 +170,7 @@ func TestProtectedEndpointRequiresAuth(t *testing.T) {
 }
 
 func TestLoginRejectsInvalidCredentials(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	body := bytes.NewBufferString(`{"login":"admin","password":"bad"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", body)
 	rr := httptest.NewRecorder()
@@ -127,8 +181,8 @@ func TestLoginRejectsInvalidCredentials(t *testing.T) {
 }
 
 func TestLogoutClearsSession(t *testing.T) {
-	srv, assignment := newTestServer(t)
-	srv.state.Update(assignment, nrpeclient.StatusOK, "up")
+	srv, assignment, _ := newTestServer(t)
+	srv.state.Update(assignment, nrpeclient.StatusOK, "up", 0)
 	body := bytes.NewBufferString(`{"login":"admin","password":"secret"}`)
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", body)
 	loginRR := httptest.NewRecorder()
@@ -170,7 +224,7 @@ func sessionCookieFromRecorder(t *testing.T, rr *httptest.ResponseRecorder) *htt
 	return nil
 }
 
-func newTestServer(t *testing.T) (*Server, model.CheckAssignment) {
+func newTestServer(t *testing.T) (*Server, model.CheckAssignment, *stubRunner) {
 	t.Helper()
 	cfg := &model.Config{
 		Hosts:  []model.HostConfig{{Name: "alpha", Hostname: "alpha"}},
@@ -183,5 +237,6 @@ func newTestServer(t *testing.T) (*Server, model.CheckAssignment) {
 	dt := downtime.NewManager(logger)
 	httpCfg := model.HTTPConfig{Host: "127.0.0.1", Port: 8080}
 	admin := model.AdminConfig{Username: "admin", Password: "secret", SessionTTL: 60}
-	return New(httpCfg, admin, st, dt, logger), assignment
+	runner := &stubRunner{}
+	return New(httpCfg, admin, st, dt, runner, logger), assignment, runner
 }
