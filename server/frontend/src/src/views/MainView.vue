@@ -71,7 +71,7 @@
               <q-separator />
               <div class="row justify-between items-center q-pa-sm">
                 <div class="text-caption text-grey-7">
-                  Showing {{ hosts.length }} of {{ hostPagination.rowsNumber }} hosts
+                  Showing {{ hostPagination.count }} of {{ hostPagination.rowsNumber }} hosts
                 </div>
                 <q-pagination
                   v-model="hostPagination.page"
@@ -178,7 +178,7 @@
               <q-separator />
               <div class="row justify-between items-center q-pa-sm">
                 <div class="text-caption text-grey-7">
-                  Showing {{ checks.length }} of {{ checkPagination.rowsNumber }} checks
+                  Showing {{ checkPagination.count }} of {{ checkPagination.rowsNumber }} checks
                 </div>
                 <q-pagination
                   v-model="checkPagination.page"
@@ -216,6 +216,7 @@ const hostPagination = reactive({
   page: 1,
   rowsPerPage: TABLE_BATCH_SIZE,
   rowsNumber: 0,
+  count: 0,
 });
 
 const checks = ref([]);
@@ -224,6 +225,7 @@ const checkPagination = reactive({
   page: 1,
   rowsPerPage: TABLE_BATCH_SIZE,
   rowsNumber: 0,
+  count: 0,
 });
 const checkActions = reactive({});
 
@@ -349,10 +351,10 @@ async function loadHosts(nextPage) {
   try {
     const data = await fetchHosts({
       page: hostPagination.page,
-      pageSize: hostPagination.rowsPerPage,
     });
     hosts.value = data.hosts || [];
-    hostPagination.rowsNumber = data.total ?? hosts.value.length;
+    hostPagination.count = data.count ?? hosts.value.length;
+    hostPagination.rowsNumber = data.total ?? hostPagination.count;
     if (data.page && data.page !== hostPagination.page) {
       hostPagination.page = data.page;
     }
@@ -371,10 +373,10 @@ async function loadChecks(nextPage) {
   try {
     const data = await fetchChecks({
       page: checkPagination.page,
-      pageSize: checkPagination.rowsPerPage,
     });
     checks.value = data.items || [];
-    checkPagination.rowsNumber = data.total ?? checks.value.length;
+    checkPagination.count = data.count ?? checks.value.length;
+    checkPagination.rowsNumber = data.total ?? checkPagination.count;
     if (data.page && data.page !== checkPagination.page) {
       checkPagination.page = data.page;
     }

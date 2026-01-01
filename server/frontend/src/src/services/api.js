@@ -36,21 +36,19 @@ export async function logout() {
   await userApi.post("/logout");
 }
 
-export async function fetchHosts({ page, pageSize }) {
+export async function fetchHosts({ page }) {
   const res = await protectedApi.get("/hosts", {
     params: {
       page,
-      page_size: pageSize,
     },
   });
   return res.data;
 }
 
-export async function fetchChecks({ page, pageSize, hostName, checkName }) {
+export async function fetchChecks({ page, hostName, checkName }) {
   const res = await protectedApi.get("/checks", {
     params: {
       page,
-      page_size: pageSize,
       host_name: hostName,
       check_name: checkName,
     },

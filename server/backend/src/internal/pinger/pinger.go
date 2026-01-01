@@ -1,21 +1,18 @@
 package pinger
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"strings"
+	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/model"
-	"github.com/drunkbatya/drnkexec/internal/osutil"
+	probing "github.com/prometheus-community/pro-bing"
 	"go.uber.org/zap"
 )
 
 const (
-	defaultPingBinary = "ping"
-	pingBinaryEnv     = "DRNKEXEC_PING_PATH"
+	defaultPingTimeout = 3 * time.Second
+	defaultPingCount   = 1
 )
 
 // Checker runs reachability checks against a host.
@@ -23,46 +20,52 @@ type Checker interface {
 	Ping(ctx context.Context, host *model.HostConfig) (string, error)
 }
 
-// NewChecker builds a ping Checker using the system ping binary.
+// NewChecker builds a ping Checker using the pro-bing ICMP implementation.
 func NewChecker(logger *zap.SugaredLogger) Checker {
-	binary := os.Getenv(pingBinaryEnv)
-	if binary == "" {
-		binary = defaultPingBinary
-	}
-	return &execChecker{logger: logger, binary: binary}
+	return &probingChecker{logger: logger}
 }
 
-type execChecker struct {
+type probingChecker struct {
 	logger *zap.SugaredLogger
-	binary string
 }
 
-func (e *execChecker) Ping(ctx context.Context, host *model.HostConfig) (string, error) {
+func (p *probingChecker) Ping(ctx context.Context, host *model.HostConfig) (string, error) {
 	target := host.Hostname
 	if host.ResolveTo != "" {
 		target = host.ResolveTo
 	}
 
-	args := []string{"-c", "1", "-W", "2", "-n", target}
-	cmd := exec.CommandContext(ctx, e.binary, args...)
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-
-	err := cmd.Run()
-	exitCode, execErr := osutil.ExitCodeFromError(err)
-	output := strings.TrimSpace(stdoutBuf.String())
-	if output == "" {
-		output = strings.TrimSpace(stderrBuf.String())
+	pinger, err := probing.NewPinger(target)
+	if err != nil {
+		return "", fmt.Errorf("create pinger: %w", err)
 	}
 
-	if execErr != nil {
-		return output, fmt.Errorf("ping exec failed: %w", execErr)
-	}
-	if exitCode != 0 {
-		return output, fmt.Errorf("ping exit code %d", exitCode)
+	pinger.Count = defaultPingCount
+	pinger.Timeout = defaultPingTimeout
+	pinger.Interval = defaultPingTimeout
+	pinger.SetPrivileged(false)
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- pinger.Run()
+	}()
+
+	select {
+	case err := <-runErr:
+		if err != nil {
+			return "", fmt.Errorf("ping failed: %w", err)
+		}
+	case <-ctx.Done():
+		pinger.Stop()
+		<-runErr
+		return "", fmt.Errorf("ping canceled: %w", ctx.Err())
 	}
 
-	e.logger.Debugf("ping ok host=%s output=%s", target, output)
+	stats := pinger.Statistics()
+	output := fmt.Sprintf("sent=%d recv=%d loss=%.1f%% avg_rtt=%s", stats.PacketsSent, stats.PacketsRecv, stats.PacketLoss, stats.AvgRtt)
+	if stats.PacketsRecv == 0 {
+		return output, fmt.Errorf("ping packet loss %.1f%%", stats.PacketLoss)
+	}
+	p.logger.Debugf("ping ok host=%s output=%s", target, output)
 	return output, nil
 }

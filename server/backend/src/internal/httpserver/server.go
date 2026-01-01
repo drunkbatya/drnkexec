@@ -14,6 +14,7 @@ import (
 	"github.com/drunkbatya/drnkexec/internal/httpserver/session"
 	"github.com/drunkbatya/drnkexec/internal/model"
 	"github.com/drunkbatya/drnkexec/internal/state"
+	"github.com/drunkbatya/drnkexec/internal/version"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"go.uber.org/zap"
 )
@@ -31,20 +32,19 @@ type Server struct {
 
 const (
 	sessionCookieName = "drnkexec_session"
+	defaultPageSize   = 20
 )
 
 type responseHosts struct {
-	Hosts    []state.HostSummary `json:"hosts"`
-	Page     int                 `json:"page"`
-	PageSize int                 `json:"page_size"`
-	Total    int                 `json:"total"`
+	Hosts []state.HostSummary `json:"hosts"`
+	Count int                 `json:"count"`
+	Total int                 `json:"total"`
 }
 
 type responseChecks struct {
-	Items    []state.CheckInfo `json:"items"`
-	Page     int               `json:"page"`
-	PageSize int               `json:"page_size"`
-	Total    int               `json:"total"`
+	Items []state.CheckInfo `json:"items"`
+	Count int               `json:"count"`
+	Total int               `json:"total"`
 }
 
 type responseCheck struct {
@@ -53,6 +53,10 @@ type responseCheck struct {
 
 type errorResponse struct {
 	Error string `json:"error"`
+}
+
+type appHealthResponse struct {
+	Status string `json:"status"`
 }
 
 type CheckRunner interface {
@@ -100,15 +104,19 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/user/login", s.handleLogin)
 	mux.HandleFunc("/api/v1/user/logout", s.requireAuth(s.handleLogout))
+	mux.HandleFunc("/api/v1/app/health", s.handleAppHealth)
+	mux.HandleFunc("/api/v1/app/version", s.handleAppVersion)
 	mux.HandleFunc("/api/v1/admin/hosts", s.requireAuth(s.handleHosts))
 	mux.HandleFunc("/api/v1/admin/checks", s.requireAuth(s.handleChecks))
 	mux.HandleFunc("/api/v1/admin/check", s.requireAuth(s.handleCheck))
 	mux.HandleFunc("/api/v1/admin/check/downtime", s.requireAuth(s.handleDowntime))
 	mux.HandleFunc("/api/v1/admin/check/now", s.requireAuth(s.handleCheckNow))
-	mux.HandleFunc("/api/docs", func(w http.ResponseWriter, r *http.Request) {
+	docsRoot := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/api/docs/", http.StatusTemporaryRedirect)
 	})
-	mux.Handle("/api/docs/", httpSwagger.Handler(httpSwagger.URL("/api/docs/doc.json")))
+	swaggerHandler := httpSwagger.Handler(httpSwagger.URL("/api/docs/doc.json"))
+	mux.Handle("/api/docs", s.requireAuthRedirect(docsRoot, "/login"))
+	mux.Handle("/api/docs/", s.requireAuthRedirect(swaggerHandler, "/login"))
 	srv := &http.Server{Addr: s.addr, Handler: mux}
 	go func() {
 		<-ctx.Done()
@@ -222,13 +230,43 @@ func (s *Server) handleCheckNow(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusAccepted, checkNowResponse{Triggered: true})
 }
 
+// handleAppHealth godoc
+// @Summary Report application health
+// @Tags app
+// @Produce json
+// @Success 200 {object} appHealthResponse
+// @Failure 405 {object} errorResponse
+// @Router /api/v1/app/health [get]
+func (s *Server) handleAppHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, appHealthResponse{Status: "ok"})
+}
+
+// handleAppVersion godoc
+// @Summary Return build metadata
+// @Tags app
+// @Produce json
+// @Success 200 {object} version.Info
+// @Failure 405 {object} errorResponse
+// @Router /api/v1/app/version [get]
+func (s *Server) handleAppVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, version.InfoData())
+}
+
 // handleHosts godoc
 // @Summary List monitored hosts
 // @Tags hosts
 // @Produce json
 // @Security SessionAuth
-// @Param page query int false "Page number (>=1)"
-// @Param page_size query int false "Page size (>=1)"
+// @Param count query int false "Number of records to return (default 20)"
+// @Param offset query int false "Number of records to skip (>=0)"
 // @Success 200 {object} responseHosts
 // @Failure 403 {object} errorResponse
 // @Router /api/v1/admin/hosts [get]
@@ -238,33 +276,25 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
-	page := parseInt(query.Get("page"), 1)
-	pageSize := parseInt(query.Get("page_size"), 20)
-	if page <= 0 {
-		page = 1
+	count := parseInt(query.Get("count"), defaultPageSize)
+	if count <= 0 {
+		count = defaultPageSize
 	}
-	if pageSize <= 0 {
-		pageSize = 20
+	offset := parseInt(query.Get("offset"), 0)
+	if offset < 0 {
+		offset = 0
 	}
 	all := s.state.HostSummaries()
 	total := len(all)
-	maxPage := (total + pageSize - 1) / pageSize
-	if maxPage == 0 {
-		maxPage = 1
+	if offset > total {
+		offset = total
 	}
-	if page > maxPage {
-		page = maxPage
-	}
-	start := (page - 1) * pageSize
-	if start > total {
-		start = total
-	}
-	end := start + pageSize
+	end := offset + count
 	if end > total {
 		end = total
 	}
-	items := all[start:end]
-	data := responseHosts{Hosts: items, Page: page, PageSize: pageSize, Total: total}
+	items := all[offset:end]
+	data := responseHosts{Hosts: items, Count: len(items), Total: total}
 	s.writeJSON(w, http.StatusOK, data)
 }
 
@@ -275,8 +305,8 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 // @Security SessionAuth
 // @Param host_name query string false "Filter by host"
 // @Param check_name query string false "Filter by check name"
-// @Param page query int false "Page number (>=1)"
-// @Param page_size query int false "Page size (>=1)"
+// @Param count query int false "Number of records to return (default 20)"
+// @Param offset query int false "Number of records to skip (>=0)"
 // @Success 200 {object} responseChecks
 // @Failure 403 {object} errorResponse
 // @Failure 404 {object} errorResponse "Host not found"
@@ -289,13 +319,13 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	hostname := query.Get("host_name")
 	checkName := query.Get("check_name")
-	page := parseInt(query.Get("page"), 1)
-	pageSize := parseInt(query.Get("page_size"), 20)
-	if page <= 0 {
-		page = 1
+	count := parseInt(query.Get("count"), defaultPageSize)
+	if count <= 0 {
+		count = defaultPageSize
 	}
-	if pageSize <= 0 {
-		pageSize = 20
+	offset := parseInt(query.Get("offset"), 0)
+	if offset < 0 {
+		offset = 0
 	}
 	checks, ok := s.state.Checks(hostname)
 	if !ok && hostname != "" {
@@ -312,16 +342,15 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 		checks = filtered
 	}
 	total := len(checks)
-	start := (page - 1) * pageSize
-	if start > total {
-		start = total
+	if offset > total {
+		offset = total
 	}
-	end := start + pageSize
+	end := offset + count
 	if end > total {
 		end = total
 	}
-	items := checks[start:end]
-	s.writeJSON(w, http.StatusOK, responseChecks{Items: items, Page: page, PageSize: pageSize, Total: total})
+	items := checks[offset:end]
+	s.writeJSON(w, http.StatusOK, responseChecks{Items: items, Count: len(items), Total: total})
 }
 
 // handleCheck godoc
@@ -394,10 +423,9 @@ type downtimeDeleteResponse struct {
 }
 
 type downtimeListResponse struct {
-	Items    []downtimeResponse `json:"items"`
-	Page     int                `json:"page"`
-	PageSize int                `json:"page_size"`
-	Total    int                `json:"total"`
+	Items []downtimeResponse `json:"items"`
+	Count int                `json:"count"`
+	Total int                `json:"total"`
 }
 
 func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
@@ -489,8 +517,8 @@ func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {
 // @Param host_name query string false "Filter by host"
 // @Param check_name query string false "Filter by check"
 // @Param name query string false "Filter by downtime name"
-// @Param page query int false "Page number (>=1)"
-// @Param page_size query int false "Page size (>=1)"
+// @Param count query int false "Number of records to return (default 20)"
+// @Param offset query int false "Number of records to skip (>=0)"
 // @Success 200 {object} downtimeListResponse
 // @Failure 403 {object} errorResponse
 // @Router /api/v1/admin/check/downtime [get]
@@ -499,29 +527,28 @@ func (s *Server) handleDowntimeList(w http.ResponseWriter, r *http.Request) {
 	host := query.Get("host_name")
 	check := query.Get("check_name")
 	name := query.Get("name")
-	page := parseInt(query.Get("page"), 1)
-	pageSize := parseInt(query.Get("page_size"), 20)
-	if page <= 0 {
-		page = 1
+	count := parseInt(query.Get("count"), defaultPageSize)
+	if count <= 0 {
+		count = defaultPageSize
 	}
-	if pageSize <= 0 {
-		pageSize = 20
+	offset := parseInt(query.Get("offset"), 0)
+	if offset < 0 {
+		offset = 0
 	}
 	entries := s.downtime.List(host, check, name, time.Now())
 	total := len(entries)
-	start := (page - 1) * pageSize
-	if start > total {
-		start = total
+	if offset > total {
+		offset = total
 	}
-	end := start + pageSize
+	end := offset + count
 	if end > total {
 		end = total
 	}
-	items := make([]downtimeResponse, 0, end-start)
-	for _, entry := range entries[start:end] {
+	items := make([]downtimeResponse, 0, end-offset)
+	for _, entry := range entries[offset:end] {
 		items = append(items, toDowntimeResponse(entry))
 	}
-	s.writeJSON(w, http.StatusOK, downtimeListResponse{Items: items, Page: page, PageSize: pageSize, Total: total})
+	s.writeJSON(w, http.StatusOK, downtimeListResponse{Items: items, Count: len(items), Total: total})
 }
 
 func toDowntimeResponse(entry downtime.Entry) downtimeResponse {
@@ -540,20 +567,51 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(sessionCookieName)
-		if err != nil || cookie.Value == "" {
-			s.clearSessionCookie(w)
+		token, ok := s.authenticateRequest(w, r)
+		if !ok {
 			s.writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
-		if !s.sessions.Validate(cookie.Value) {
-			s.clearSessionCookie(w)
-			s.writeError(w, http.StatusForbidden, "forbidden")
-			return
-		}
-		s.setSessionCookie(w, cookie.Value)
+		s.setSessionCookie(w, token)
 		next(w, r)
 	}
+}
+
+func (s *Server) requireAuthHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, ok := s.authenticateRequest(w, r)
+		if !ok {
+			s.writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		s.setSessionCookie(w, token)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) requireAuthRedirect(next http.Handler, redirectPath string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, ok := s.authenticateRequest(w, r)
+		if !ok {
+			http.Redirect(w, r, redirectPath, http.StatusFound)
+			return
+		}
+		s.setSessionCookie(w, token)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request) (string, bool) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil || cookie.Value == "" {
+		s.clearSessionCookie(w)
+		return "", false
+	}
+	if !s.sessions.Validate(cookie.Value) {
+		s.clearSessionCookie(w)
+		return "", false
+	}
+	return cookie.Value, true
 }
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, token string) {

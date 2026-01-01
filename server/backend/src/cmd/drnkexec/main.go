@@ -14,6 +14,8 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -28,12 +30,24 @@ import (
 	"github.com/drunkbatya/drnkexec/internal/pinger"
 	"github.com/drunkbatya/drnkexec/internal/scheduler"
 	"github.com/drunkbatya/drnkexec/internal/state"
+	"github.com/drunkbatya/drnkexec/internal/version"
 	"go.uber.org/zap"
 )
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "Path to the YAML config file")
+	showVersion := flag.Bool("version", false, "Print build information and exit")
 	flag.Parse()
+
+	if *showVersion {
+		info, err := version.Printable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "version: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(info)
+		return
+	}
 
 	zapLogger, err := zap.NewProduction()
 	if err != nil {

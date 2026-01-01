@@ -1,55 +1,60 @@
-GO = go
-APP_NAME = drunkexec-server
-BUILD_DIR = build
-ENTRYPOINT = cmd/$(APP_NAME)/main.go
-TARGET = $(BUILD_DIR)/$(APP_NAME)
+GO ?= go
+CGO_ENABLED ?= 1
+SRC_DIR := src
+BIN_DIR := build
+APP_NAME ?= drnkexec-server
+CMD_PACKAGE := ./cmd/drnkexec
+TARGET := $(BIN_DIR)/$(APP_NAME)
+MODULE_PATH := github.com/drunkbatya/drnkexec
 
-GO_SRC = $(shell find . -type f -name "*.go")
-MOD_SRC = $(shell find . -type f -name "*.mod")
-ALL_SRC = $(GO_SRC) $(MOD_SRC)
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+GIT_BRANCH := $(shell echo $${WORKFLOW_BRANCH_OR_TAG-$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)})
+GIT_BRANCH_NUM := $(shell git rev-list --count HEAD 2>/dev/null || echo nan)
+BUILD_DATE := $(shell date '+%d-%m-%Y' 2>/dev/null || echo unknown)
+BUILD_TIME := $(shell date '+%H:%M:%S' 2>/dev/null || echo unknown)
+BUILD_VERSION := $(shell git describe --tags --abbrev=0 --exact-match 2>/dev/null || echo unknown)
 
-$(shell mkdir -p $(BUILD_DIR))
+LDFLAGS := \
+	-X $(MODULE_PATH)/internal/version.gitCommit=$(GIT_COMMIT) \
+	-X $(MODULE_PATH)/internal/version.gitBranch=$(GIT_BRANCH) \
+	-X $(MODULE_PATH)/internal/version.gitBranchNum=$(GIT_BRANCH_NUM) \
+	-X $(MODULE_PATH)/internal/version.buildDate=$(BUILD_DATE) \
+	-X $(MODULE_PATH)/internal/version.buildTime=$(BUILD_TIME) \
+	-X $(MODULE_PATH)/internal/version.buildVersion=$(BUILD_VERSION)
 
-GIT_COMMIT	  := $(shell git rev-parse --short HEAD || echo 'unknown')
-GIT_BRANCH	  := $(shell echo $${WORKFLOW_BRANCH_OR_TAG-$$(git rev-parse --abbrev-ref HEAD || echo 'unknown')})
-GIT_BRANCH_NUM  := $(shell git rev-list --count HEAD || echo 'nan')
-BUILD_DATE	  := $(shell date '+%d-%m-%Y' || echo 'unknown')
-BUILD_TIME	  := $(shell date '+%H:%M:%S' || echo 'unknown')
-VERSION		 := $(shell git describe --tags --abbrev=0 --exact-match 2>/dev/null || echo 'unknown')
+DOCS := $(SRC_DIR)/docs/docs.go $(SRC_DIR)/docs/swagger.json $(SRC_DIR)/docs/swagger.yaml
+NON_DOC_GO := $(shell cd $(SRC_DIR) && find . -path './docs' -prune -o -name '*.go' -print)
+NON_DOC_GO := $(addprefix $(SRC_DIR)/,$(filter-out ./docs/docs.go,$(NON_DOC_GO)))
+MOD_FILES := $(SRC_DIR)/go.mod $(SRC_DIR)/go.sum
 
-GO_FLAGS := CGO_ENABLED=0
+.PHONY: all build run clean test
 
-LDFLAGS = \
-	-X $(APP_NAME)/internal/models.gitCommit=$(GIT_COMMIT) \
-	-X $(APP_NAME)/internal/models.gitBranch=$(GIT_BRANCH) \
-	-X $(APP_NAME)/internal/models.gitBranchNum=$(GIT_BRANCH_NUM) \
-	-X $(APP_NAME)/internal/models.buildDate=$(BUILD_DATE) \
-	-X $(APP_NAME)/internal/models.buildTime=$(BUILD_TIME) \
-	-X $(APP_NAME)/internal/models.version=$(VERSION)
+all: build
 
-all: $(TARGET)
+build: $(TARGET)
 
-#@GOOS=linux GOARCH=amd64 $(GO) build
-$(TARGET): $(ALL_SRC) Makefile
-	@echo "\tGO\t$@"
-	@$(GO_FLAGS) $(GO) build \
+$(TARGET): $(DOCS) $(NON_DOC_GO) $(MOD_FILES)
+	@mkdir -p $(BIN_DIR)
+	@echo "\tGO\t$(TARGET)"
+	@cd $(SRC_DIR) && CGO_ENABLED=$(CGO_ENABLED) $(GO) build \
 		-ldflags "$(LDFLAGS)" \
-		-o $(TARGET) \
-		$(ENTRYPOINT)
+		-o ../$(TARGET) \
+		$(CMD_PACKAGE)
 
-.PHONY: run
-run: $(TARGET)
+run: build
+	@echo "\tRUN\t$(TARGET)"
 	@./$(TARGET)
 
-.PHONY: format
-format:
-	@for CUR in $(GO_SRC); do \
-		echo "\tFMT\t$$CUR"; \
-		$(GO) fmt $$CUR; \
-	done
+test: $(DOCS)
+	@echo "\tTEST\t./..."
+	@cd $(SRC_DIR) && $(GO) test ./...
 
-.PHONY: clean
+generate: $(DOCS)
+
+$(DOCS): $(NON_DOC_GO) $(MOD_FILES)
+	@echo "\tGEN\tswagger"
+	@cd $(SRC_DIR) && $(GO) generate ./...
+
 clean:
-	@echo "\tRM\t$(BUILD_DIR)"
-	@-rm -rf $(BUILD_DIR)
-
+	@echo "\tRM\t$(BIN_DIR)"
+	@rm -rf $(BIN_DIR)

@@ -43,7 +43,7 @@ func TestHandleHostsAndChecks(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&hosts); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(hosts.Hosts) != 1 || hosts.Hosts[0].Hostname != "alpha" || hosts.Page != 1 || hosts.PageSize <= 0 || hosts.Total != 1 {
+	if len(hosts.Hosts) != 1 || hosts.Hosts[0].Hostname != "alpha" || hosts.Count <= 0 || hosts.Total != 1 {
 		t.Fatalf("unexpected hosts %+v", hosts)
 	}
 
@@ -136,6 +136,40 @@ func TestHandleCheckNowError(t *testing.T) {
 	}
 }
 
+func TestAppHealth(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/app/health", nil)
+	srv.handleAppHealth(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d", rr.Code)
+	}
+	var resp appHealthResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "ok" {
+		t.Fatalf("unexpected response %+v", resp)
+	}
+}
+
+func TestAppVersion(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/app/version", nil)
+	srv.handleAppVersion(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d", rr.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["name"] == "" {
+		t.Fatalf("expected name in version response, got %+v", resp)
+	}
+}
+
 func TestLoginAndAuthFlow(t *testing.T) {
 	srv, assignment, _ := newTestServer(t)
 	srv.state.Update(assignment, nrpeclient.StatusOK, "up", 0)
@@ -208,6 +242,71 @@ func TestLogoutClearsSession(t *testing.T) {
 	protected(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected forbidden after logout, got %d", rr.Code)
+	}
+}
+
+func TestRequireAuthHandler(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	protected := srv.requireAuthHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/hosts", nil)
+	protected.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without auth, got %d", rr.Code)
+	}
+
+	loginBody := bytes.NewBufferString(`{"login":"admin","password":"secret"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", loginBody)
+	loginRR := httptest.NewRecorder()
+	srv.handleLogin(loginRR, loginReq)
+	if loginRR.Code != http.StatusOK {
+		t.Fatalf("login failed with %d", loginRR.Code)
+	}
+	sessionCookie := sessionCookieFromRecorder(t, loginRR)
+
+	rr = httptest.NewRecorder()
+	authReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/hosts", nil)
+	authReq.AddCookie(sessionCookie)
+	protected.ServeHTTP(rr, authReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected OK with auth, got %d", rr.Code)
+	}
+}
+
+func TestRequireAuthRedirect(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	redirected := srv.requireAuthRedirect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), "/login")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/docs/", nil)
+	redirected.ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected redirect without auth, got %d", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/login" {
+		t.Fatalf("expected redirect to /login, got %s", loc)
+	}
+
+	loginBody := bytes.NewBufferString(`{"login":"admin","password":"secret"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", loginBody)
+	loginRR := httptest.NewRecorder()
+	srv.handleLogin(loginRR, loginReq)
+	if loginRR.Code != http.StatusOK {
+		t.Fatalf("login failed with %d", loginRR.Code)
+	}
+	sessionCookie := sessionCookieFromRecorder(t, loginRR)
+
+	rr = httptest.NewRecorder()
+	authReq := httptest.NewRequest(http.MethodGet, "/api/docs/", nil)
+	authReq.AddCookie(sessionCookie)
+	redirected.ServeHTTP(rr, authReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected OK with auth, got %d", rr.Code)
 	}
 }
 
