@@ -71,7 +71,7 @@
                   >
                     <template #header>
                       <q-item-section avatar>
-                        <q-icon name="dns" />
+                        <q-icon name="dns" :color="hostStatusColor(host)" />
                       </q-item-section>
                       <q-item-section>
                         <div class="text-subtitle1">{{ host.Hostname }}</div>
@@ -644,6 +644,25 @@ function statusColor(status) {
     default:
       return "grey";
   }
+}
+
+function hostStatusColor(host) {
+  if (!host) {
+    return "grey";
+  }
+  if (host.Critical > 0) {
+    return "negative";
+  }
+  if (host.Warning > 0) {
+    return "warning";
+  }
+  if (host.OK > 0 && (host.Unknown === 0 || !host.Unknown)) {
+    return "positive";
+  }
+  if (host.Unknown > 0) {
+    return "grey";
+  }
+  return "grey";
 }
 
 function formatDate(value) {
