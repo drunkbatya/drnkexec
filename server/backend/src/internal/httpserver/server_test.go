@@ -51,24 +51,38 @@ func TestHandleHostsAndChecks(t *testing.T) {
 	}
 
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/checks?host_name=missing", nil)
-	srv.handleChecks(rr, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for missing host")
-	}
-
-	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/checks?host_name=alpha", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/checks", nil)
 	srv.handleChecks(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d", rr.Code)
 	}
-	var checksResp responseChecks
+	var checksResp responseCheckSummaries
 	if err := json.NewDecoder(rr.Body).Decode(&checksResp); err != nil {
 		t.Fatalf("decode checks: %v", err)
 	}
-	if len(checksResp.Items) != 1 || checksResp.Items[0].Hostname != "alpha" {
-		t.Fatalf("unexpected checks response %+v", checksResp)
+	if len(checksResp.Checks) != 1 || checksResp.Checks[0].CheckName != "svc" || checksResp.Checks[0].OK != 1 {
+		t.Fatalf("unexpected checks summary %+v", checksResp)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/checks/detail?host_name=missing", nil)
+	srv.handleCheckDetails(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing host detail, got %d", rr.Code)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/checks/detail?check_name=svc", nil)
+	srv.handleCheckDetails(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d", rr.Code)
+	}
+	var detailResp responseCheckDetails
+	if err := json.NewDecoder(rr.Body).Decode(&detailResp); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if len(detailResp.Items) != 1 || detailResp.Items[0].Hostname != "alpha" {
+		t.Fatalf("unexpected detail response %+v", detailResp)
 	}
 }
 

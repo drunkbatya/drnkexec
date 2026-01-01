@@ -100,7 +100,19 @@ export async function fetchHosts({ count, offset } = {}) {
   return res.data;
 }
 
-export async function fetchChecks({ count, offset, hostName, checkName } = {}) {
+export async function fetchCheckSummaries({ count, offset } = {}) {
+  const params = {};
+  if (typeof count === "number") {
+    params.count = count;
+  }
+  if (typeof offset === "number") {
+    params.offset = offset;
+  }
+  const res = await protectedApi.get("/checks", { params });
+  return res.data;
+}
+
+export async function fetchCheckDetails({ count, offset, hostName, checkName } = {}) {
   const params = {};
   if (typeof count === "number") {
     params.count = count;
@@ -114,7 +126,7 @@ export async function fetchChecks({ count, offset, hostName, checkName } = {}) {
   if (checkName) {
     params.check_name = checkName;
   }
-  const res = await protectedApi.get("/checks", { params });
+  const res = await protectedApi.get("/checks/detail", { params });
   return res.data;
 }
 

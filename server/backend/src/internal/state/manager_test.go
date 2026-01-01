@@ -70,6 +70,33 @@ func TestManagerUpdateAndQueries(t *testing.T) {
 	}
 }
 
+func TestCheckSummaries(t *testing.T) {
+	cfg := testConfig()
+	logger := zaptest.NewLogger(t).Sugar()
+	m := NewManager(logger, cfg)
+	assignments := cfg.LookupMaps.CheckAssignments
+	m.Update(assignments[0], nrpeclient.StatusCritical, "bad", 1)
+	m.Update(assignments[1], nrpeclient.StatusOK, "ok", 0)
+
+	summaries := m.CheckSummaries()
+	if len(summaries) != 2 {
+		t.Fatalf("expected 2 check summaries, got %d", len(summaries))
+	}
+	var alphaSummary *CheckSummary
+	for i := range summaries {
+		if summaries[i].CheckName == "check-alpha" {
+			alphaSummary = &summaries[i]
+			break
+		}
+	}
+	if alphaSummary == nil {
+		t.Fatalf("missing check-alpha summary")
+	}
+	if alphaSummary.HostCount != 1 || alphaSummary.Critical != 1 {
+		t.Fatalf("unexpected alpha summary %+v", alphaSummary)
+	}
+}
+
 func testConfig() *model.Config {
 	cfg := &model.Config{
 		Hosts: []model.HostConfig{

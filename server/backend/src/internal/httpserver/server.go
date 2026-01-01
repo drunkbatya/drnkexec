@@ -42,7 +42,13 @@ type responseHosts struct {
 	Total int                 `json:"total"`
 }
 
-type responseChecks struct {
+type responseCheckSummaries struct {
+	Checks []state.CheckSummary `json:"checks"`
+	Count  int                  `json:"count"`
+	Total  int                  `json:"total"`
+}
+
+type responseCheckDetails struct {
 	Items []state.CheckInfo `json:"items"`
 	Count int               `json:"count"`
 	Total int               `json:"total"`
@@ -106,6 +112,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/app/version", s.handleAppVersion)
 	mux.HandleFunc("/api/v1/admin/hosts", s.requireAuth(s.handleHosts))
 	mux.HandleFunc("/api/v1/admin/checks", s.requireAuth(s.handleChecks))
+	mux.HandleFunc("/api/v1/admin/checks/detail", s.requireAuth(s.handleCheckDetails))
 	mux.HandleFunc("/api/v1/admin/downtime", s.requireAuth(s.handleDowntime))
 	mux.HandleFunc("/api/v1/admin/check/now", s.requireAuth(s.handleCheckNow))
 	docsRoot := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +303,44 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleChecks godoc
-// @Summary List checks with optional filters
+// @Summary List aggregated checks with status statistics
+// @Tags checks
+// @Produce json
+// @Security SessionAuth
+// @Param count query int false "Number of records to return (default 20)"
+// @Param offset query int false "Number of records to skip (>=0)"
+// @Success 200 {object} responseCheckSummaries
+// @Failure 403 {object} errorResponse
+// @Router /api/v1/admin/checks [get]
+func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	query := r.URL.Query()
+	count := parseInt(query.Get("count"), defaultPageSize)
+	if count <= 0 {
+		count = defaultPageSize
+	}
+	offset := parseInt(query.Get("offset"), 0)
+	if offset < 0 {
+		offset = 0
+	}
+	summaries := s.state.CheckSummaries()
+	total := len(summaries)
+	if offset > total {
+		offset = total
+	}
+	end := offset + count
+	if end > total {
+		end = total
+	}
+	items := summaries[offset:end]
+	s.writeJSON(w, http.StatusOK, responseCheckSummaries{Checks: items, Count: len(items), Total: total})
+}
+
+// handleCheckDetails godoc
+// @Summary List check execution details with optional filters
 // @Tags checks
 // @Produce json
 // @Security SessionAuth
@@ -304,11 +348,11 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 // @Param check_name query string false "Filter by check name"
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
-// @Success 200 {object} responseChecks
+// @Success 200 {object} responseCheckDetails
 // @Failure 403 {object} errorResponse
 // @Failure 404 {object} errorResponse "Host not found"
-// @Router /api/v1/admin/checks [get]
-func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
+// @Router /api/v1/admin/checks/detail [get]
+func (s *Server) handleCheckDetails(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -347,7 +391,7 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 		end = total
 	}
 	items := checks[offset:end]
-	s.writeJSON(w, http.StatusOK, responseChecks{Items: items, Count: len(items), Total: total})
+	s.writeJSON(w, http.StatusOK, responseCheckDetails{Items: items, Count: len(items), Total: total})
 }
 
 type downtimeRequest struct {

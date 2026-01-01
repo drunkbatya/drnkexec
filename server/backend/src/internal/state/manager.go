@@ -39,6 +39,15 @@ type HostSummary struct {
 	Unknown    int
 }
 
+type CheckSummary struct {
+	CheckName string
+	HostCount int
+	OK        int
+	Warning   int
+	Critical  int
+	Unknown   int
+}
+
 type Manager struct {
 	mu         sync.RWMutex
 	hostChecks map[string]map[string]*CheckInfo
@@ -182,6 +191,41 @@ func (m *Manager) Check(hostname, checkname string) (CheckInfo, bool) {
 		return CheckInfo{}, false
 	}
 	return *info, true
+}
+
+func (m *Manager) CheckSummaries() []CheckSummary {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	summaryMap := make(map[string]*CheckSummary)
+	names := make([]string, 0)
+	for _, hostname := range m.hostOrder {
+		checks := m.hostChecks[hostname]
+		for checkName, info := range checks {
+			summary, ok := summaryMap[checkName]
+			if !ok {
+				summary = &CheckSummary{CheckName: checkName}
+				summaryMap[checkName] = summary
+				names = append(names, checkName)
+			}
+			summary.HostCount++
+			switch info.Status {
+			case StatusOK:
+				summary.OK++
+			case StatusWarning:
+				summary.Warning++
+			case StatusCritical:
+				summary.Critical++
+			default:
+				summary.Unknown++
+			}
+		}
+	}
+	sort.Strings(names)
+	result := make([]CheckSummary, 0, len(names))
+	for _, name := range names {
+		result = append(result, *summaryMap[name])
+	}
+	return result
 }
 
 func (m *Manager) buildHostSummaryLocked(hostname string) HostSummary {

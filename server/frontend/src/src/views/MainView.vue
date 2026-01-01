@@ -114,7 +114,13 @@
                         </template>
                         <template #body-cell-updatedAt="props">
                           <q-td :props="props">
-                            {{ formatDate(props.row.UpdatedAt) }}
+                            <button
+                              class="date-toggle"
+                              type="button"
+                              @click="toggleHostDateMode(hostKey(props.row))"
+                            >
+                              {{ formattedDate(props.row.UpdatedAt, hostDateModes[hostKey(props.row)]) }}
+                            </button>
                           </q-td>
                         </template>
                         <template #body-cell-fail="props">
@@ -187,7 +193,7 @@
                   flat
                   dense
                   icon="refresh"
-                  @click="loadChecks"
+                  @click="refreshChecks"
                   :loading="loadingChecks"
                 />
               </q-card-section>
@@ -202,69 +208,106 @@
                 <q-list v-else bordered class="rounded-borders bg-white">
                   <q-expansion-item
                     v-for="group in checkGroups"
-                    :key="group.checkName"
-                    v-model="checkExpanded[group.checkName]"
+                    :key="group.CheckName"
+                    v-model="checkExpanded[group.CheckName]"
+                    @show="() => loadCheckDetails(group.CheckName)"
                     expand-separator
                     header-class="bg-grey-2 text-dark text-weight-medium"
                   >
                     <template #header>
                       <q-item-section avatar>
-                        <q-icon name="dns" />
+                        <q-icon name="fact_check" :color="hostStatusColor(group)" />
                       </q-item-section>
                       <q-item-section>
-                        <div class="text-subtitle1">{{ group.checkName }}</div>
+                        <div class="text-subtitle1">{{ group.CheckName }}</div>
                         <div class="text-caption text-grey-7">
-                          {{ group.items.length }} hosts
+                          Hosts: {{ group.HostCount || 0 }} —
+                          OK: {{ group.OK || 0 }},
+                          Warning: {{ group.Warning || 0 }},
+                          Critical: {{ group.Critical || 0 }},
+                          Unknown: {{ group.Unknown || 0 }}
                         </div>
                       </q-item-section>
                     </template>
 
-                    <q-table
-                      flat
-                      dense
-                      :rows="group.items"
-                      :columns="checkHostColumns"
-                      row-key="Hostname"
-                      hide-bottom
+                    <div v-if="getCheckDetailsState(group.CheckName).loading" class="text-center q-my-lg">
+                      <q-spinner-dots color="primary" size="2rem" />
+                    </div>
+                    <div
+                      v-else-if="getCheckDetailsState(group.CheckName).items.length === 0"
+                      class="text-grey-7 text-center q-my-md"
                     >
-                      <template #body-cell-status="props">
-                        <q-td :props="props">
-                          <q-badge
-                            :color="statusColor(props.row.Status)"
-                            :label="props.row.Status?.toUpperCase() || 'UNKNOWN'"
-                            align="middle"
-                          />
-                        </q-td>
-                      </template>
-                      <template #body-cell-updatedAt="props">
-                        <q-td :props="props">
-                          {{ formatDate(props.row.UpdatedAt) }}
-                        </q-td>
-                      </template>
-                      <template #body-cell-fail="props">
-                        <q-td :props="props">
-                          {{ props.row.FailCount || 0 }} / {{ props.row.FailThreshold || 0 }}
-                        </q-td>
-                      </template>
-                      <template #body-cell-output="props">
-                        <q-td :props="props">
-                          <div class="text-body2">{{ props.row.Output || "—" }}</div>
-                        </q-td>
-                      </template>
-                      <template #body-cell-actions="props">
-                        <q-td :props="props">
-                          <q-btn
-                            size="sm"
-                            flat
-                            color="primary"
-                            icon="play_arrow"
-                            label="Check Now"
-                            :loading="isCheckRunning(props.row)"
-                            @click="runCheckNow(props.row)"
-                          />
-                        </q-td>
-                      </template>
-                    </q-table>
+                      No hosts to display
+                    </div>
+                    <template v-else>
+                      <q-table
+                        flat
+                        dense
+                        :rows="getCheckDetailsState(group.CheckName).items"
+                        :columns="checkHostColumns"
+                        row-key="Hostname"
+                        hide-bottom
+                      >
+                        <template #body-cell-status="props">
+                          <q-td :props="props">
+                            <q-badge
+                              :color="statusColor(props.row.Status)"
+                              :label="props.row.Status?.toUpperCase() || 'UNKNOWN'"
+                              align="middle"
+                            />
+                          </q-td>
+                        </template>
+                        <template #body-cell-updatedAt="props">
+                          <q-td :props="props">
+                            <button
+                              class="date-toggle"
+                              type="button"
+                              @click="toggleCheckDateMode(checkKey(props.row))"
+                            >
+                              {{ formattedDate(props.row.UpdatedAt, checkDateModes[checkKey(props.row)]) }}
+                            </button>
+                          </q-td>
+                        </template>
+                        <template #body-cell-fail="props">
+                          <q-td :props="props">
+                            {{ props.row.FailCount || 0 }} / {{ props.row.FailThreshold || 0 }}
+                          </q-td>
+                        </template>
+                        <template #body-cell-output="props">
+                          <q-td :props="props">
+                            <div class="text-body2">{{ props.row.Output || "—" }}</div>
+                          </q-td>
+                        </template>
+                        <template #body-cell-actions="props">
+                          <q-td :props="props">
+                            <q-btn
+                              size="sm"
+                              flat
+                              color="primary"
+                              icon="play_arrow"
+                              label="Check Now"
+                              :loading="isCheckRunning(props.row)"
+                              @click="runCheckNow(props.row)"
+                            />
+                          </q-td>
+                        </template>
+                      </q-table>
+                      <div class="row justify-between items-center q-pa-sm">
+                        <div class="text-caption text-grey-7">
+                          Showing {{ getCheckDetailsState(group.CheckName).count }}
+                          of {{ getCheckDetailsState(group.CheckName).rowsNumber }} hosts
+                        </div>
+                        <q-pagination
+                          :model-value="getCheckDetailsState(group.CheckName).page"
+                          :max="checkDetailsMaxPage(group.CheckName)"
+                          color="primary"
+                          boundary-numbers
+                          :max-pages="6"
+                          dense
+                          @update:model-value="(page) => changeCheckDetailsPage(group.CheckName, page)"
+                        />
+                      </div>
+                    </template>
                   </q-expansion-item>
                 </q-list>
               </div>
@@ -280,7 +323,7 @@
                   boundary-numbers
                   :max-pages="6"
                   dense
-                  @update:model-value="loadChecks"
+                  @update:model-value="loadCheckSummaries"
                 />
               </div>
             </q-card>
@@ -296,7 +339,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Notify } from "quasar";
-import { fetchChecks, fetchHosts, logout, triggerCheckNow } from "../services/api";
+import { fetchCheckDetails, fetchCheckSummaries, fetchHosts, logout, triggerCheckNow } from "../services/api";
 import { TABLE_BATCH_SIZE } from "../config";
 import { activeRequests } from "../services/requestTracker";
 
@@ -335,8 +378,19 @@ const checkActions = reactive({});
 const hostExpanded = reactive({});
 const checkExpanded = reactive({});
 
-const checks = ref([]);
+const checkSummaries = ref([]);
 const loadingChecks = ref(false);
+const checkDetailsState = reactive({});
+const defaultCheckDetailsState = {
+  page: 1,
+  rowsPerPage: TABLE_BATCH_SIZE,
+  rowsNumber: 0,
+  count: 0,
+  items: [],
+  loading: false,
+};
+const hostDateModes = reactive({});
+const checkDateModes = reactive({});
 
 const hostCheckColumns = [
   {
@@ -432,24 +486,11 @@ const checkMaxPage = computed(() => {
   return Math.ceil(total / perPage);
 });
 
-const checkGroups = computed(() => {
-  const groups = [];
-  const index = new Map();
-  checks.value.forEach((check) => {
-    const checkName = check.CheckName || "unknown";
-    if (!index.has(checkName)) {
-      const entry = { checkName, items: [] };
-      index.set(checkName, entry);
-      groups.push(entry);
-    }
-    index.get(checkName).items.push(check);
-  });
-  return groups;
-});
+const checkGroups = computed(() => checkSummaries.value);
 
 onMounted(() => {
   loadHosts();
-  loadChecks();
+  loadCheckSummaries();
 });
 
 async function loadHosts(nextPage, options = {}) {
@@ -495,7 +536,8 @@ function changeHostPage(nextPage) {
   loadHosts(nextPage);
 }
 
-async function loadChecks(nextPage) {
+async function loadCheckSummaries(nextPage, options = {}) {
+  const refreshOpen = options.refreshOpen === true;
   if (typeof nextPage === "number") {
     checkPagination.page = nextPage;
   }
@@ -504,25 +546,38 @@ async function loadChecks(nextPage) {
   const offset = (page - 1) * perPage;
   loadingChecks.value = true;
   try {
-    const data = await fetchChecks({
+    const data = await fetchCheckSummaries({
       count: perPage,
       offset,
     });
-    checks.value = data.items || [];
-    checkPagination.count = data.count ?? checks.value.length;
+    checkSummaries.value = data.checks || [];
+    checkPagination.count = data.count ?? checkSummaries.value.length;
     checkPagination.rowsNumber = data.total ?? checkPagination.count;
     const maxPage = checkMaxPage.value;
     if (page > maxPage && maxPage > 0) {
       checkPagination.page = maxPage;
       if (maxPage !== page) {
-        await loadChecks(maxPage);
+        await loadCheckSummaries(maxPage, options);
+        return;
       }
+    }
+    if (refreshOpen) {
+      const expandedChecks = checkSummaries.value
+        .filter((check) => checkExpanded[check.CheckName])
+        .map((check) => check.CheckName);
+      await Promise.all(
+        expandedChecks.map((checkName) => loadCheckDetails(checkName, getCheckDetailsState(checkName).page))
+      );
     }
   } catch (err) {
     console.error("load checks", err);
   } finally {
     loadingChecks.value = false;
   }
+}
+
+function refreshChecks() {
+  loadCheckSummaries(undefined, { refreshOpen: true });
 }
 
 function createHostChecksState() {
@@ -566,7 +621,7 @@ async function loadHostChecks(hostname, nextPage) {
   const offset = (page - 1) * perPage;
   state.loading = true;
   try {
-    const data = await fetchChecks({
+    const data = await fetchCheckDetails({
       hostName: hostname,
       count: perPage,
       offset,
@@ -602,6 +657,83 @@ function changeHostChecksPage(hostname, nextPage) {
   loadHostChecks(hostname, nextPage);
 }
 
+function createCheckDetailsState() {
+  return reactive({
+    page: 1,
+    rowsPerPage: TABLE_BATCH_SIZE,
+    rowsNumber: 0,
+    count: 0,
+    items: [],
+    loading: false,
+  });
+}
+
+function resolveCheckDetailsState(checkName) {
+  if (!checkName) {
+    return createCheckDetailsState();
+  }
+  if (!checkDetailsState[checkName]) {
+    checkDetailsState[checkName] = createCheckDetailsState();
+  }
+  return checkDetailsState[checkName];
+}
+
+function getCheckDetailsState(checkName) {
+  if (!checkName) {
+    return defaultCheckDetailsState;
+  }
+  return checkDetailsState[checkName] || defaultCheckDetailsState;
+}
+
+async function loadCheckDetails(checkName, nextPage) {
+  if (!checkName) {
+    return;
+  }
+  const state = resolveCheckDetailsState(checkName);
+  if (typeof nextPage === "number") {
+    state.page = nextPage;
+  }
+  const perPage = state.rowsPerPage || TABLE_BATCH_SIZE;
+  const page = Math.max(1, state.page);
+  const offset = (page - 1) * perPage;
+  state.loading = true;
+  try {
+    const data = await fetchCheckDetails({
+      checkName,
+      count: perPage,
+      offset,
+    });
+    state.items = data.items || [];
+    state.count = data.count ?? state.items.length;
+    state.rowsNumber = data.total ?? state.count;
+    const maxPage = checkDetailsMaxPage(checkName);
+    if (page > maxPage && maxPage > 0) {
+      state.page = maxPage;
+      if (maxPage !== page) {
+        await loadCheckDetails(checkName, maxPage);
+      }
+    }
+  } catch (err) {
+    console.error("load check details", err);
+  } finally {
+    state.loading = false;
+  }
+}
+
+function checkDetailsMaxPage(checkName) {
+  const state = getCheckDetailsState(checkName);
+  const total = state.rowsNumber || 0;
+  const perPage = state.rowsPerPage || TABLE_BATCH_SIZE;
+  if (total === 0) {
+    return 1;
+  }
+  return Math.ceil(total / perPage);
+}
+
+function changeCheckDetailsPage(checkName, nextPage) {
+  loadCheckDetails(checkName, nextPage);
+}
+
 watch(
   hosts,
   (list) => {
@@ -616,17 +748,34 @@ watch(
         delete hostChecksState[key];
       }
     });
+    Object.keys(hostDateModes).forEach((key) => {
+      const [hostname] = key.split("::");
+      if (!allowed.has(hostname)) {
+        delete hostDateModes[key];
+      }
+    });
   },
   { immediate: true }
 );
 
 watch(
-  checkGroups,
+  checkSummaries,
   (groups) => {
-    const allowed = new Set(groups.map((group) => group.checkName));
+    const allowed = new Set(groups.map((group) => group.CheckName));
     Object.keys(checkExpanded).forEach((key) => {
       if (!allowed.has(key)) {
         delete checkExpanded[key];
+      }
+    });
+    Object.keys(checkDetailsState).forEach((key) => {
+      if (!allowed.has(key)) {
+        delete checkDetailsState[key];
+      }
+    });
+    Object.keys(checkDateModes).forEach((key) => {
+      const [checkName] = key.split("::");
+      if (!allowed.has(checkName)) {
+        delete checkDateModes[key];
       }
     });
   },
@@ -665,7 +814,50 @@ function hostStatusColor(host) {
   return "grey";
 }
 
-function formatDate(value) {
+function hostKey(row) {
+  return `${row.Hostname || ""}::${row.CheckName || ""}`;
+}
+
+function checkKey(row) {
+  return `${row.CheckName || ""}::${row.Hostname || ""}`;
+}
+
+function toggleHostDateMode(key) {
+  hostDateModes[key] = !hostDateModes[key];
+}
+
+function toggleCheckDateMode(key) {
+  checkDateModes[key] = !checkDateModes[key];
+}
+
+function formattedDate(value, absoluteMode) {
+  if (absoluteMode) {
+    return formatAbsolute(value);
+  }
+  return formatRelative(value);
+}
+
+function formatRelative(value) {
+  if (!value) {
+    return "—";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const now = Date.now();
+  const diffMs = now - date.getTime();
+  if (diffMs < 0) {
+    return "just now";
+  }
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 1) {
+    return "just now";
+  }
+  return formatDuration(seconds) + " ago";
+}
+
+function formatAbsolute(value) {
   if (!value) {
     return "—";
   }
@@ -674,6 +866,27 @@ function formatDate(value) {
     return value;
   }
   return date.toLocaleString();
+}
+
+function formatDuration(totalSeconds) {
+  const units = [
+    { label: "d", value: 86400 },
+    { label: "h", value: 3600 },
+    { label: "m", value: 60 },
+    { label: "s", value: 1 },
+  ];
+  let remaining = totalSeconds;
+  const parts = [];
+  for (const unit of units) {
+    if (remaining >= unit.value || (unit.label === "s" && parts.length === 0)) {
+      const count = Math.floor(remaining / unit.value);
+      if (count > 0 || unit.label === "s") {
+        parts.push(`${count}${unit.label}`);
+      }
+      remaining -= count * unit.value;
+    }
+  }
+  return parts.join("");
 }
 
 async function handleLogout() {
@@ -708,10 +921,14 @@ async function runCheckNow(row) {
       type: "positive",
       message: `Triggered ${row.CheckName} on ${row.Hostname}`,
     });
-    await Promise.all([loadHosts(hostPagination.page), loadChecks(checkPagination.page)]);
+    await Promise.all([loadHosts(hostPagination.page), loadCheckSummaries(checkPagination.page)]);
     const hostVisible = hosts.value.some((host) => host.Hostname === row.Hostname);
-    if (hostVisible) {
-      await loadHostChecks(row.Hostname, getHostChecksState(row.Hostname).page);
+  if (hostVisible) {
+    await loadHostChecks(row.Hostname, getHostChecksState(row.Hostname).page);
+  }
+    const checkVisible = checkSummaries.value.some((check) => check.CheckName === row.CheckName);
+    if (checkVisible) {
+      await loadCheckDetails(row.CheckName, getCheckDetailsState(row.CheckName).page);
     }
   } catch (err) {
     console.error("check now failed", err);
