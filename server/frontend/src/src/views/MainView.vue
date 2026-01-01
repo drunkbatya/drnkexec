@@ -48,34 +48,87 @@
                   flat
                   dense
                   icon="refresh"
-                  @click="loadHosts"
-                  :loading="loadingHosts"
+                  @click="loadChecks"
+                  :loading="loadingChecks"
                 />
               </q-card-section>
               <q-separator />
-              <q-table
-                flat
-                dense
-                row-key="Hostname"
-                :rows="hosts"
-                :columns="hostColumns"
-                :loading="loadingHosts"
-                hide-bottom
-              >
-                <template #no-data>
-                  <div class="full-width text-center text-grey-7 q-pa-md">
-                    No hosts to display
-                  </div>
-                </template>
-                <template #loading>
-                  <q-inner-loading showing color="primary" />
-                </template>
-                <template #body-cell-hostname="props">
-                  <q-td :props="props">
-                    <div class="text-weight-medium">{{ props.row.Hostname }}</div>
-                  </q-td>
-                </template>
-              </q-table>
+              <div class="q-pa-md">
+                <div v-if="loadingChecks" class="text-center q-my-lg">
+                  <q-spinner-dots color="primary" size="2rem" />
+                </div>
+                <div v-else-if="pagedHostGroups.length === 0" class="text-grey-7 text-center">
+                  No hosts to display
+                </div>
+                <q-list v-else bordered class="rounded-borders bg-white">
+                  <q-expansion-item
+                    v-for="group in pagedHostGroups"
+                    :key="group.hostname"
+                    v-model="hostExpanded[group.hostname]"
+                    expand-separator
+                    header-class="bg-grey-2 text-dark text-weight-medium"
+                  >
+                    <template #header>
+                      <q-item-section avatar>
+                        <q-icon name="dns" />
+                      </q-item-section>
+                      <q-item-section>
+                        <div class="text-subtitle1">{{ group.hostname }}</div>
+                        <div class="text-caption text-grey-7">
+                          {{ group.items.length }} checks
+                        </div>
+                      </q-item-section>
+                    </template>
+
+                    <q-table
+                      flat
+                      dense
+                      :rows="group.items"
+                      :columns="hostCheckColumns"
+                      row-key="CheckName"
+                      hide-bottom
+                    >
+                      <template #body-cell-status="props">
+                        <q-td :props="props">
+                          <q-badge
+                            :color="statusColor(props.row.Status)"
+                            :label="props.row.Status?.toUpperCase() || 'UNKNOWN'"
+                            align="middle"
+                          />
+                        </q-td>
+                      </template>
+                      <template #body-cell-updatedAt="props">
+                        <q-td :props="props">
+                          {{ formatDate(props.row.UpdatedAt) }}
+                        </q-td>
+                      </template>
+                      <template #body-cell-fail="props">
+                        <q-td :props="props">
+                          {{ props.row.FailCount || 0 }} / {{ props.row.FailThreshold || 0 }}
+                        </q-td>
+                      </template>
+                      <template #body-cell-output="props">
+                        <q-td :props="props">
+                          <div class="text-body2">{{ props.row.Output || "—" }}</div>
+                        </q-td>
+                      </template>
+                      <template #body-cell-actions="props">
+                        <q-td :props="props">
+                          <q-btn
+                            size="sm"
+                            flat
+                            color="primary"
+                            icon="play_arrow"
+                            label="Check Now"
+                            :loading="isCheckRunning(props.row)"
+                            @click="runCheckNow(props.row)"
+                          />
+                        </q-td>
+                      </template>
+                    </q-table>
+                  </q-expansion-item>
+                </q-list>
+              </div>
               <q-separator />
               <div class="row justify-between items-center q-pa-sm">
                 <div class="text-caption text-grey-7">
@@ -88,7 +141,7 @@
                   boundary-numbers
                   :max-pages="6"
                   dense
-                  @update:model-value="loadHosts"
+                  @update:model-value="changeHostPage"
                 />
               </div>
             </q-card>
@@ -112,13 +165,14 @@
                 <div v-if="loadingChecks" class="text-center q-my-lg">
                   <q-spinner-dots color="primary" size="2rem" />
                 </div>
-                <div v-else-if="groupedChecks.length === 0" class="text-grey-7 text-center">
+                <div v-else-if="checkGroups.length === 0" class="text-grey-7 text-center">
                   No checks for current page
                 </div>
                 <q-list v-else bordered class="rounded-borders bg-white">
                   <q-expansion-item
-                    v-for="group in groupedChecks"
-                    :key="group.hostname"
+                    v-for="group in checkGroups"
+                    :key="group.checkName"
+                    v-model="checkExpanded[group.checkName]"
                     expand-separator
                     header-class="bg-grey-2 text-dark text-weight-medium"
                   >
@@ -127,9 +181,9 @@
                         <q-icon name="dns" />
                       </q-item-section>
                       <q-item-section>
-                        <div class="text-subtitle1">{{ group.hostname }}</div>
+                        <div class="text-subtitle1">{{ group.checkName }}</div>
                         <div class="text-caption text-grey-7">
-                          {{ group.items.length }} checks
+                          {{ group.items.length }} hosts
                         </div>
                       </q-item-section>
                     </template>
@@ -138,8 +192,8 @@
                       flat
                       dense
                       :rows="group.items"
-                      :columns="checkColumns"
-                      row-key="CheckName"
+                      :columns="checkHostColumns"
+                      row-key="Hostname"
                       hide-bottom
                     >
                       <template #body-cell-status="props">
@@ -208,10 +262,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Notify } from "quasar";
-import { fetchChecks, fetchHosts, logout, triggerCheckNow } from "../services/api";
+import { fetchChecks, logout, triggerCheckNow } from "../services/api";
 import { TABLE_BATCH_SIZE } from "../config";
 import { activeRequests } from "../services/requestTracker";
 
@@ -221,8 +275,6 @@ const globalLoading = computed(() => activeRequests.value > 0);
 const activeTab = ref("hosts");
 const logoutLoading = ref(false);
 
-const hosts = ref([]);
-const loadingHosts = ref(false);
 const hostPagination = reactive({
   page: 1,
   rowsPerPage: TABLE_BATCH_SIZE,
@@ -230,8 +282,6 @@ const hostPagination = reactive({
   count: 0,
 });
 
-const checks = ref([]);
-const loadingChecks = ref(false);
 const checkPagination = reactive({
   page: 1,
   rowsPerPage: TABLE_BATCH_SIZE,
@@ -239,50 +289,55 @@ const checkPagination = reactive({
   count: 0,
 });
 const checkActions = reactive({});
+const hostExpanded = reactive({});
+const checkExpanded = reactive({});
 
-const hostColumns = [
-  {
-    name: "hostname",
-    label: "Hostname",
-    field: (row) => row.Hostname,
-    align: "left",
-    sortable: true,
-  },
-  {
-    name: "ok",
-    label: "OK",
-    field: (row) => row.OK,
-    align: "right",
-    sortable: true,
-  },
-  {
-    name: "warning",
-    label: "Warning",
-    field: (row) => row.Warning,
-    align: "right",
-    sortable: true,
-  },
-  {
-    name: "critical",
-    label: "Critical",
-    field: (row) => row.Critical,
-    align: "right",
-    sortable: true,
-  },
-  {
-    name: "unknown",
-    label: "Unknown",
-    field: (row) => row.Unknown,
-    align: "right",
-    sortable: true,
-  },
-];
+const checks = ref([]);
+const loadingChecks = ref(false);
 
-const checkColumns = [
+const hostCheckColumns = [
   {
     name: "check",
     label: "Check",
     field: (row) => row.CheckName,
+    align: "left",
+  },
+  {
+    name: "status",
+    label: "Status",
+    field: (row) => row.Status,
+    align: "left",
+  },
+  {
+    name: "updatedAt",
+    label: "Last Check",
+    field: (row) => row.UpdatedAt,
+    align: "left",
+  },
+  {
+    name: "fail",
+    label: "Fails",
+    field: (row) => row.FailCount,
+    align: "right",
+  },
+  {
+    name: "output",
+    label: "Output",
+    field: (row) => row.Output,
+    align: "left",
+  },
+  {
+    name: "actions",
+    label: "Actions",
+    align: "right",
+  },
+];
+
+const checkHostColumns = [
+  {
+    name: "hostname",
+    label: "Host",
+    field: (row) => row.Hostname,
     align: "left",
   },
   {
@@ -334,7 +389,7 @@ const checkMaxPage = computed(() => {
   return Math.ceil(total / perPage);
 });
 
-const groupedChecks = computed(() => {
+const hostGroups = computed(() => {
   const groups = [];
   const index = new Map();
   checks.value.forEach((check) => {
@@ -349,31 +404,37 @@ const groupedChecks = computed(() => {
   return groups;
 });
 
+const pagedHostGroups = computed(() => {
+  const groups = hostGroups.value;
+  const perPage = hostPagination.rowsPerPage || TABLE_BATCH_SIZE;
+  const page = Math.max(1, hostPagination.page);
+  const start = (page - 1) * perPage;
+  const sliced = groups.slice(start, start + perPage);
+  hostPagination.count = sliced.length;
+  return sliced;
+});
+
+const checkGroups = computed(() => {
+  const groups = [];
+  const index = new Map();
+  checks.value.forEach((check) => {
+    const checkName = check.CheckName || "unknown";
+    if (!index.has(checkName)) {
+      const entry = { checkName, items: [] };
+      index.set(checkName, entry);
+      groups.push(entry);
+    }
+    index.get(checkName).items.push(check);
+  });
+  return groups;
+});
+
 onMounted(() => {
-  loadHosts();
   loadChecks();
 });
 
-async function loadHosts(nextPage) {
-  if (typeof nextPage === "number") {
-    hostPagination.page = nextPage;
-  }
-  loadingHosts.value = true;
-  try {
-    const data = await fetchHosts({
-      page: hostPagination.page,
-    });
-    hosts.value = data.hosts || [];
-    hostPagination.count = data.count ?? hosts.value.length;
-    hostPagination.rowsNumber = data.total ?? hostPagination.count;
-    if (data.page && data.page !== hostPagination.page) {
-      hostPagination.page = data.page;
-    }
-  } catch (err) {
-    console.error("load hosts", err);
-  } finally {
-    loadingHosts.value = false;
-  }
+function changeHostPage(nextPage) {
+  hostPagination.page = nextPage;
 }
 
 async function loadChecks(nextPage) {
@@ -397,6 +458,40 @@ async function loadChecks(nextPage) {
     loadingChecks.value = false;
   }
 }
+
+watch(
+  hostGroups,
+  (groups) => {
+    hostPagination.rowsNumber = groups.length;
+    const max = hostMaxPage.value;
+    if (hostPagination.page > max) {
+      hostPagination.page = max;
+    }
+    if (hostPagination.page <= 0) {
+      hostPagination.page = 1;
+    }
+    const allowed = new Set(groups.map((group) => group.hostname));
+    Object.keys(hostExpanded).forEach((key) => {
+      if (!allowed.has(key)) {
+        delete hostExpanded[key];
+      }
+    });
+  },
+  { immediate: true }
+);
+
+watch(
+  checkGroups,
+  (groups) => {
+    const allowed = new Set(groups.map((group) => group.checkName));
+    Object.keys(checkExpanded).forEach((key) => {
+      if (!allowed.has(key)) {
+        delete checkExpanded[key];
+      }
+    });
+  },
+  { immediate: true }
+);
 
 function statusColor(status) {
   switch (status) {

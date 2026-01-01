@@ -28,7 +28,7 @@ NON_DOC_GO := $(shell cd $(SRC_DIR) && find . -path './docs' -prune -o -name '*.
 NON_DOC_GO := $(addprefix $(SRC_DIR)/,$(filter-out ./docs/docs.go,$(NON_DOC_GO)))
 MOD_FILES := $(SRC_DIR)/go.mod $(SRC_DIR)/go.sum
 
-.PHONY: all build run clean test docker
+.PHONY: all build run run-dev clean test docker
 
 all: build
 
@@ -45,6 +45,10 @@ $(TARGET): $(DOCS) $(NON_DOC_GO) $(MOD_FILES)
 run: build
 	@echo "\tRUN\t$(TARGET)"
 	@./$(TARGET) --config $(CONFIG_FILE)
+
+run-dev: build
+	@echo "\tRUN\t$(TARGET) (noauth)"
+	@./$(TARGET) --config $(CONFIG_FILE) --noauth
 
 test: $(DOCS)
 	@echo "\tTEST\t./..."

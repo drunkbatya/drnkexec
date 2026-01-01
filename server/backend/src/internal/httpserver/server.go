@@ -28,6 +28,7 @@ type Server struct {
 	sessions   *session.Manager
 	sessionTTL time.Duration
 	runner     CheckRunner
+	noAuth     bool
 }
 
 const (
@@ -85,7 +86,7 @@ type checkNowResponse struct {
 	Triggered bool `json:"triggered"`
 }
 
-func New(cfg model.HTTPConfig, admin model.AdminConfig, state *state.Manager, downtime *downtime.Manager, runner CheckRunner, logger *zap.SugaredLogger) *Server {
+func New(cfg model.HTTPConfig, admin model.AdminConfig, state *state.Manager, downtime *downtime.Manager, runner CheckRunner, logger *zap.SugaredLogger, noAuth bool) *Server {
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	ttl := time.Duration(admin.SessionTTL) * time.Second
 	return &Server{
@@ -97,6 +98,7 @@ func New(cfg model.HTTPConfig, admin model.AdminConfig, state *state.Manager, do
 		sessions:   session.NewManager(ttl),
 		sessionTTL: ttl,
 		runner:     runner,
+		noAuth:     noAuth,
 	}
 }
 
@@ -109,7 +111,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/admin/hosts", s.requireAuth(s.handleHosts))
 	mux.HandleFunc("/api/v1/admin/checks", s.requireAuth(s.handleChecks))
 	mux.HandleFunc("/api/v1/admin/check", s.requireAuth(s.handleCheck))
-	mux.HandleFunc("/api/v1/admin/check/downtime", s.requireAuth(s.handleDowntime))
+	mux.HandleFunc("/api/v1/admin/downtime", s.requireAuth(s.handleDowntime))
 	mux.HandleFunc("/api/v1/admin/check/now", s.requireAuth(s.handleCheckNow))
 	docsRoot := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/api/docs/", http.StatusTemporaryRedirect)
@@ -443,7 +445,7 @@ func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
 
 // handleDowntimeDelete godoc
 // @Summary Remove a downtime entry
-// @Tags downtime
+// @Tags downtimes
 // @Accept json
 // @Produce json
 // @Security SessionAuth
@@ -452,7 +454,7 @@ func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {object} errorResponse
 // @Failure 403 {object} errorResponse
 // @Failure 404 {object} errorResponse
-// @Router /api/v1/admin/check/downtime [delete]
+// @Router /api/v1/admin/downtime [delete]
 func (s *Server) handleDowntimeDelete(w http.ResponseWriter, r *http.Request) {
 	var req downtimeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -477,7 +479,7 @@ func (s *Server) handleDowntimeDelete(w http.ResponseWriter, r *http.Request) {
 
 // handleDowntimeCreate godoc
 // @Summary Schedule downtime for checks
-// @Tags downtime
+// @Tags downtimes
 // @Accept json
 // @Produce json
 // @Security SessionAuth
@@ -485,7 +487,7 @@ func (s *Server) handleDowntimeDelete(w http.ResponseWriter, r *http.Request) {
 // @Success 201 {object} downtimeResponse
 // @Failure 400 {object} errorResponse
 // @Failure 403 {object} errorResponse
-// @Router /api/v1/admin/check/downtime [post]
+// @Router /api/v1/admin/downtime [post]
 func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {
 	var req downtimeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -511,7 +513,7 @@ func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {
 
 // handleDowntimeList godoc
 // @Summary List active downtime entries
-// @Tags downtime
+// @Tags downtimes
 // @Produce json
 // @Security SessionAuth
 // @Param host_name query string false "Filter by host"
@@ -521,7 +523,7 @@ func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {
 // @Param offset query int false "Number of records to skip (>=0)"
 // @Success 200 {object} downtimeListResponse
 // @Failure 403 {object} errorResponse
-// @Router /api/v1/admin/check/downtime [get]
+// @Router /api/v1/admin/downtime [get]
 func (s *Server) handleDowntimeList(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	host := query.Get("host_name")
@@ -567,6 +569,10 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if s.noAuth {
+			next(w, r)
+			return
+		}
 		token, ok := s.authenticateRequest(w, r)
 		if !ok {
 			s.writeError(w, http.StatusForbidden, "forbidden")
@@ -579,6 +585,10 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) requireAuthHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.noAuth {
+			next.ServeHTTP(w, r)
+			return
+		}
 		token, ok := s.authenticateRequest(w, r)
 		if !ok {
 			s.writeError(w, http.StatusForbidden, "forbidden")
@@ -591,6 +601,10 @@ func (s *Server) requireAuthHandler(next http.Handler) http.Handler {
 
 func (s *Server) requireAuthRedirect(next http.Handler, redirectPath string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.noAuth {
+			next.ServeHTTP(w, r)
+			return
+		}
 		token, ok := s.authenticateRequest(w, r)
 		if !ok {
 			http.Redirect(w, r, redirectPath, http.StatusFound)

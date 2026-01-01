@@ -66,14 +66,14 @@ func TestHandleDowntimeLifecycle(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	body := bytes.NewBufferString(`{"name":"maint","host_name":"alpha","duration":5}`)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/check/downtime", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/downtime", body)
 	srv.handleDowntime(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("unexpected status %d", rr.Code)
 	}
 
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/check/downtime", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/downtime", nil)
 	srv.handleDowntime(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d", rr.Code)
@@ -90,7 +90,7 @@ func TestHandleDowntimeLifecycle(t *testing.T) {
 
 	delBody := bytes.NewBufferString(`{"name":"maint","host_name":"alpha"}`)
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/admin/check/downtime", delBody)
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/admin/downtime", delBody)
 	srv.handleDowntime(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d on delete", rr.Code)
@@ -337,5 +337,5 @@ func newTestServer(t *testing.T) (*Server, model.CheckAssignment, *stubRunner) {
 	httpCfg := model.HTTPConfig{Host: "127.0.0.1", Port: 8080}
 	admin := model.AdminConfig{Username: "admin", Password: "secret", SessionTTL: 60}
 	runner := &stubRunner{}
-	return New(httpCfg, admin, st, dt, runner, logger), assignment, runner
+	return New(httpCfg, admin, st, dt, runner, logger, false), assignment, runner
 }

@@ -36,6 +36,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "Path to the YAML config file")
+	noAuth := flag.Bool("noauth", false, "Disable authentication (development only)")
 	showVersion := flag.Bool("version", false, "Print build information and exit")
 	flag.Parse()
 
@@ -72,7 +73,7 @@ func main() {
 	stateManager := state.NewManager(logger, cfg)
 	downtimeManager := downtime.NewManager(logger)
 	sched := scheduler.NewScheduler(logger, nrpeClient, alertManager, pingChecker, stateManager, downtimeManager)
-	apiServer := httpserver.New(cfg.HTTP, cfg.Admin, stateManager, downtimeManager, sched, logger)
+	apiServer := httpserver.New(cfg.HTTP, cfg.Admin, stateManager, downtimeManager, sched, logger, *noAuth)
 	go func() {
 		if err := apiServer.Start(ctx); err != nil {
 			logger.Fatalf("http server error: %v", err)
