@@ -88,23 +88,33 @@ export async function logout() {
   await userApi.post("/logout");
 }
 
-export async function fetchHosts({ page }) {
-  const res = await protectedApi.get("/hosts", {
-    params: {
-      page,
-    },
-  });
+export async function fetchHosts({ count, offset } = {}) {
+  const params = {};
+  if (typeof count === "number") {
+    params.count = count;
+  }
+  if (typeof offset === "number") {
+    params.offset = offset;
+  }
+  const res = await protectedApi.get("/hosts", { params });
   return res.data;
 }
 
-export async function fetchChecks({ page, hostName, checkName }) {
-  const res = await protectedApi.get("/checks", {
-    params: {
-      page,
-      host_name: hostName,
-      check_name: checkName,
-    },
-  });
+export async function fetchChecks({ count, offset, hostName, checkName } = {}) {
+  const params = {};
+  if (typeof count === "number") {
+    params.count = count;
+  }
+  if (typeof offset === "number") {
+    params.offset = offset;
+  }
+  if (hostName) {
+    params.host_name = hostName;
+  }
+  if (checkName) {
+    params.check_name = checkName;
+  }
+  const res = await protectedApi.get("/checks", { params });
   return res.data;
 }
 

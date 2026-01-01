@@ -65,6 +65,9 @@ func TestManagerUpdateAndQueries(t *testing.T) {
 	if summary.Warning != 1 {
 		t.Fatalf("expected warning count 1, got %+v", summary)
 	}
+	if summary.CheckCount != 1 {
+		t.Fatalf("expected check count 1, got %+v", summary)
+	}
 }
 
 func testConfig() *model.Config {

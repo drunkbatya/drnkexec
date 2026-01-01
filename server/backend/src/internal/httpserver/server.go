@@ -48,10 +48,6 @@ type responseChecks struct {
 	Total int               `json:"total"`
 }
 
-type responseCheck struct {
-	Check state.CheckInfo `json:"check"`
-}
-
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -110,7 +106,6 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/app/version", s.handleAppVersion)
 	mux.HandleFunc("/api/v1/admin/hosts", s.requireAuth(s.handleHosts))
 	mux.HandleFunc("/api/v1/admin/checks", s.requireAuth(s.handleChecks))
-	mux.HandleFunc("/api/v1/admin/check", s.requireAuth(s.handleCheck))
 	mux.HandleFunc("/api/v1/admin/downtime", s.requireAuth(s.handleDowntime))
 	mux.HandleFunc("/api/v1/admin/check/now", s.requireAuth(s.handleCheckNow))
 	docsRoot := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -353,38 +348,6 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 	}
 	items := checks[offset:end]
 	s.writeJSON(w, http.StatusOK, responseChecks{Items: items, Count: len(items), Total: total})
-}
-
-// handleCheck godoc
-// @Summary Get details for a single check
-// @Tags checks
-// @Produce json
-// @Security SessionAuth
-// @Param host_name query string true "Host name"
-// @Param check_name query string true "Check name"
-// @Success 200 {object} responseCheck
-// @Failure 400 {object} errorResponse
-// @Failure 403 {object} errorResponse
-// @Failure 404 {object} errorResponse
-// @Router /api/v1/admin/check [get]
-func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	query := r.URL.Query()
-	hostname := query.Get("host_name")
-	checkname := query.Get("check_name")
-	if hostname == "" || checkname == "" {
-		s.writeError(w, http.StatusBadRequest, "host_name and check_name are required")
-		return
-	}
-	check, ok := s.state.Check(hostname, checkname)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "check not found")
-		return
-	}
-	s.writeJSON(w, http.StatusOK, responseCheck{Check: check})
 }
 
 type downtimeRequest struct {

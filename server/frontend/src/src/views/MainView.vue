@@ -48,23 +48,24 @@
                   flat
                   dense
                   icon="refresh"
-                  @click="loadChecks"
-                  :loading="loadingChecks"
+                  @click="loadHosts"
+                  :loading="loadingHosts"
                 />
               </q-card-section>
               <q-separator />
               <div class="q-pa-md">
-                <div v-if="loadingChecks" class="text-center q-my-lg">
+                <div v-if="loadingHosts" class="text-center q-my-lg">
                   <q-spinner-dots color="primary" size="2rem" />
                 </div>
-                <div v-else-if="pagedHostGroups.length === 0" class="text-grey-7 text-center">
+                <div v-else-if="hosts.length === 0" class="text-grey-7 text-center">
                   No hosts to display
                 </div>
                 <q-list v-else bordered class="rounded-borders bg-white">
                   <q-expansion-item
-                    v-for="group in pagedHostGroups"
-                    :key="group.hostname"
-                    v-model="hostExpanded[group.hostname]"
+                    v-for="host in hosts"
+                    :key="host.Hostname"
+                    v-model="hostExpanded[host.Hostname]"
+                    @show="() => loadHostChecks(host.Hostname)"
                     expand-separator
                     header-class="bg-grey-2 text-dark text-weight-medium"
                   >
@@ -73,59 +74,89 @@
                         <q-icon name="dns" />
                       </q-item-section>
                       <q-item-section>
-                        <div class="text-subtitle1">{{ group.hostname }}</div>
+                        <div class="text-subtitle1">{{ host.Hostname }}</div>
                         <div class="text-caption text-grey-7">
-                          {{ group.items.length }} checks
+                          {{ host.CheckCount || 0 }} checks —
+                          OK: {{ host.OK || 0 }},
+                          Warning: {{ host.Warning || 0 }},
+                          Critical: {{ host.Critical || 0 }},
+                          Unknown: {{ host.Unknown || 0 }}
                         </div>
                       </q-item-section>
                     </template>
 
-                    <q-table
-                      flat
-                      dense
-                      :rows="group.items"
-                      :columns="hostCheckColumns"
-                      row-key="CheckName"
-                      hide-bottom
+                    <div v-if="getHostChecksState(host.Hostname).loading" class="text-center q-my-lg">
+                      <q-spinner-dots color="primary" size="2rem" />
+                    </div>
+                    <div
+                      v-else-if="getHostChecksState(host.Hostname).items.length === 0"
+                      class="text-grey-7 text-center q-my-md"
                     >
-                      <template #body-cell-status="props">
-                        <q-td :props="props">
-                          <q-badge
-                            :color="statusColor(props.row.Status)"
-                            :label="props.row.Status?.toUpperCase() || 'UNKNOWN'"
-                            align="middle"
-                          />
-                        </q-td>
-                      </template>
-                      <template #body-cell-updatedAt="props">
-                        <q-td :props="props">
-                          {{ formatDate(props.row.UpdatedAt) }}
-                        </q-td>
-                      </template>
-                      <template #body-cell-fail="props">
-                        <q-td :props="props">
-                          {{ props.row.FailCount || 0 }} / {{ props.row.FailThreshold || 0 }}
-                        </q-td>
-                      </template>
-                      <template #body-cell-output="props">
-                        <q-td :props="props">
-                          <div class="text-body2">{{ props.row.Output || "—" }}</div>
-                        </q-td>
-                      </template>
-                      <template #body-cell-actions="props">
-                        <q-td :props="props">
-                          <q-btn
-                            size="sm"
-                            flat
-                            color="primary"
-                            icon="play_arrow"
-                            label="Check Now"
-                            :loading="isCheckRunning(props.row)"
-                            @click="runCheckNow(props.row)"
-                          />
-                        </q-td>
-                      </template>
-                    </q-table>
+                      No checks to display
+                    </div>
+                    <template v-else>
+                      <q-table
+                        flat
+                        dense
+                        :rows="getHostChecksState(host.Hostname).items"
+                        :columns="hostCheckColumns"
+                        row-key="CheckName"
+                        hide-bottom
+                      >
+                        <template #body-cell-status="props">
+                          <q-td :props="props">
+                            <q-badge
+                              :color="statusColor(props.row.Status)"
+                              :label="props.row.Status?.toUpperCase() || 'UNKNOWN'"
+                              align="middle"
+                            />
+                          </q-td>
+                        </template>
+                        <template #body-cell-updatedAt="props">
+                          <q-td :props="props">
+                            {{ formatDate(props.row.UpdatedAt) }}
+                          </q-td>
+                        </template>
+                        <template #body-cell-fail="props">
+                          <q-td :props="props">
+                            {{ props.row.FailCount || 0 }} / {{ props.row.FailThreshold || 0 }}
+                          </q-td>
+                        </template>
+                        <template #body-cell-output="props">
+                          <q-td :props="props">
+                            <div class="text-body2">{{ props.row.Output || "—" }}</div>
+                          </q-td>
+                        </template>
+                        <template #body-cell-actions="props">
+                          <q-td :props="props">
+                            <q-btn
+                              size="sm"
+                              flat
+                              color="primary"
+                              icon="play_arrow"
+                              label="Check Now"
+                              :loading="isCheckRunning(props.row)"
+                              @click="runCheckNow(props.row)"
+                            />
+                          </q-td>
+                        </template>
+                      </q-table>
+                      <div class="row justify-between items-center q-pa-sm">
+                        <div class="text-caption text-grey-7">
+                          Showing {{ getHostChecksState(host.Hostname).count }}
+                          of {{ getHostChecksState(host.Hostname).rowsNumber }} checks
+                        </div>
+                        <q-pagination
+                          :model-value="getHostChecksState(host.Hostname).page"
+                          :max="hostChecksMaxPage(host.Hostname)"
+                          color="primary"
+                          boundary-numbers
+                          :max-pages="6"
+                          dense
+                          @update:model-value="(page) => changeHostChecksPage(host.Hostname, page)"
+                        />
+                      </div>
+                    </template>
                   </q-expansion-item>
                 </q-list>
               </div>
@@ -265,7 +296,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Notify } from "quasar";
-import { fetchChecks, logout, triggerCheckNow } from "../services/api";
+import { fetchChecks, fetchHosts, logout, triggerCheckNow } from "../services/api";
 import { TABLE_BATCH_SIZE } from "../config";
 import { activeRequests } from "../services/requestTracker";
 
@@ -281,6 +312,18 @@ const hostPagination = reactive({
   rowsNumber: 0,
   count: 0,
 });
+
+const hosts = ref([]);
+const loadingHosts = ref(false);
+const hostChecksState = reactive({});
+const defaultHostChecksState = {
+  page: 1,
+  rowsPerPage: TABLE_BATCH_SIZE,
+  rowsNumber: 0,
+  count: 0,
+  items: [],
+  loading: false,
+};
 
 const checkPagination = reactive({
   page: 1,
@@ -389,31 +432,6 @@ const checkMaxPage = computed(() => {
   return Math.ceil(total / perPage);
 });
 
-const hostGroups = computed(() => {
-  const groups = [];
-  const index = new Map();
-  checks.value.forEach((check) => {
-    const hostname = check.Hostname || "unknown";
-    if (!index.has(hostname)) {
-      const entry = { hostname, items: [] };
-      index.set(hostname, entry);
-      groups.push(entry);
-    }
-    index.get(hostname).items.push(check);
-  });
-  return groups;
-});
-
-const pagedHostGroups = computed(() => {
-  const groups = hostGroups.value;
-  const perPage = hostPagination.rowsPerPage || TABLE_BATCH_SIZE;
-  const page = Math.max(1, hostPagination.page);
-  const start = (page - 1) * perPage;
-  const sliced = groups.slice(start, start + perPage);
-  hostPagination.count = sliced.length;
-  return sliced;
-});
-
 const checkGroups = computed(() => {
   const groups = [];
   const index = new Map();
@@ -430,27 +448,63 @@ const checkGroups = computed(() => {
 });
 
 onMounted(() => {
+  loadHosts();
   loadChecks();
 });
 
+async function loadHosts(nextPage) {
+  if (typeof nextPage === "number") {
+    hostPagination.page = nextPage;
+  }
+  const perPage = hostPagination.rowsPerPage || TABLE_BATCH_SIZE;
+  const page = Math.max(1, hostPagination.page);
+  const offset = (page - 1) * perPage;
+  loadingHosts.value = true;
+  try {
+    const data = await fetchHosts({ count: perPage, offset });
+    hosts.value = data.hosts || [];
+    hostPagination.count = data.count ?? hosts.value.length;
+    hostPagination.rowsNumber = data.total ?? hostPagination.count;
+    const maxPage = hostMaxPage.value;
+    if (page > maxPage && maxPage > 0) {
+      hostPagination.page = maxPage;
+      if (maxPage !== page) {
+        await loadHosts(maxPage);
+      }
+    }
+  } catch (err) {
+    console.error("load hosts", err);
+  } finally {
+    loadingHosts.value = false;
+  }
+}
+
 function changeHostPage(nextPage) {
-  hostPagination.page = nextPage;
+  loadHosts(nextPage);
 }
 
 async function loadChecks(nextPage) {
   if (typeof nextPage === "number") {
     checkPagination.page = nextPage;
   }
+  const perPage = checkPagination.rowsPerPage || TABLE_BATCH_SIZE;
+  const page = Math.max(1, checkPagination.page);
+  const offset = (page - 1) * perPage;
   loadingChecks.value = true;
   try {
     const data = await fetchChecks({
-      page: checkPagination.page,
+      count: perPage,
+      offset,
     });
     checks.value = data.items || [];
     checkPagination.count = data.count ?? checks.value.length;
     checkPagination.rowsNumber = data.total ?? checkPagination.count;
-    if (data.page && data.page !== checkPagination.page) {
-      checkPagination.page = data.page;
+    const maxPage = checkMaxPage.value;
+    if (page > maxPage && maxPage > 0) {
+      checkPagination.page = maxPage;
+      if (maxPage !== page) {
+        await loadChecks(maxPage);
+      }
     }
   } catch (err) {
     console.error("load checks", err);
@@ -459,21 +513,95 @@ async function loadChecks(nextPage) {
   }
 }
 
+function createHostChecksState() {
+  return reactive({
+    page: 1,
+    rowsPerPage: TABLE_BATCH_SIZE,
+    rowsNumber: 0,
+    count: 0,
+    items: [],
+    loading: false,
+  });
+}
+
+function resolveHostChecksState(hostname) {
+  if (!hostname) {
+    return createHostChecksState();
+  }
+  if (!hostChecksState[hostname]) {
+    hostChecksState[hostname] = createHostChecksState();
+  }
+  return hostChecksState[hostname];
+}
+
+function getHostChecksState(hostname) {
+  if (!hostname) {
+    return defaultHostChecksState;
+  }
+  return hostChecksState[hostname] || defaultHostChecksState;
+}
+
+async function loadHostChecks(hostname, nextPage) {
+  if (!hostname) {
+    return;
+  }
+  const state = resolveHostChecksState(hostname);
+  if (typeof nextPage === "number") {
+    state.page = nextPage;
+  }
+  const perPage = state.rowsPerPage || TABLE_BATCH_SIZE;
+  const page = Math.max(1, state.page);
+  const offset = (page - 1) * perPage;
+  state.loading = true;
+  try {
+    const data = await fetchChecks({
+      hostName: hostname,
+      count: perPage,
+      offset,
+    });
+    state.items = data.items || [];
+    state.count = data.count ?? state.items.length;
+    state.rowsNumber = data.total ?? state.count;
+    const maxPage = hostChecksMaxPage(hostname);
+    if (page > maxPage && maxPage > 0) {
+      state.page = maxPage;
+      if (maxPage !== page) {
+        await loadHostChecks(hostname, maxPage);
+      }
+    }
+  } catch (err) {
+    console.error("load host checks", err);
+  } finally {
+    state.loading = false;
+  }
+}
+
+function hostChecksMaxPage(hostname) {
+  const state = getHostChecksState(hostname);
+  const total = state.rowsNumber || 0;
+  const perPage = state.rowsPerPage || TABLE_BATCH_SIZE;
+  if (total === 0) {
+    return 1;
+  }
+  return Math.ceil(total / perPage);
+}
+
+function changeHostChecksPage(hostname, nextPage) {
+  loadHostChecks(hostname, nextPage);
+}
+
 watch(
-  hostGroups,
-  (groups) => {
-    hostPagination.rowsNumber = groups.length;
-    const max = hostMaxPage.value;
-    if (hostPagination.page > max) {
-      hostPagination.page = max;
-    }
-    if (hostPagination.page <= 0) {
-      hostPagination.page = 1;
-    }
-    const allowed = new Set(groups.map((group) => group.hostname));
+  hosts,
+  (list) => {
+    const allowed = new Set(list.map((host) => host.Hostname));
     Object.keys(hostExpanded).forEach((key) => {
       if (!allowed.has(key)) {
         delete hostExpanded[key];
+      }
+    });
+    Object.keys(hostChecksState).forEach((key) => {
+      if (!allowed.has(key)) {
+        delete hostChecksState[key];
       }
     });
   },
@@ -549,7 +677,11 @@ async function runCheckNow(row) {
       type: "positive",
       message: `Triggered ${row.CheckName} on ${row.Hostname}`,
     });
-    await loadChecks();
+    await Promise.all([loadHosts(hostPagination.page), loadChecks(checkPagination.page)]);
+    const hostVisible = hosts.value.some((host) => host.Hostname === row.Hostname);
+    if (hostVisible) {
+      await loadHostChecks(row.Hostname, getHostChecksState(row.Hostname).page);
+    }
   } catch (err) {
     console.error("check now failed", err);
     Notify.create({

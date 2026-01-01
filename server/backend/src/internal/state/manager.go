@@ -31,11 +31,12 @@ type CheckInfo struct {
 }
 
 type HostSummary struct {
-	Hostname string
-	OK       int
-	Warning  int
-	Critical int
-	Unknown  int
+	Hostname   string
+	CheckCount int
+	OK         int
+	Warning    int
+	Critical   int
+	Unknown    int
 }
 
 type Manager struct {
@@ -190,6 +191,7 @@ func (m *Manager) buildHostSummaryLocked(hostname string) HostSummary {
 
 func (m *Manager) buildHostSummaryFromChecks(hostname string, checks map[string]*CheckInfo) HostSummary {
 	summary := HostSummary{Hostname: hostname}
+	summary.CheckCount = len(checks)
 	for _, info := range checks {
 		switch info.Status {
 		case StatusOK:

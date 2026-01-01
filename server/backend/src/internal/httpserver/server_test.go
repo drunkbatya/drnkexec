@@ -46,6 +46,9 @@ func TestHandleHostsAndChecks(t *testing.T) {
 	if len(hosts.Hosts) != 1 || hosts.Hosts[0].Hostname != "alpha" || hosts.Count <= 0 || hosts.Total != 1 {
 		t.Fatalf("unexpected hosts %+v", hosts)
 	}
+	if hosts.Hosts[0].CheckCount != 1 || hosts.Hosts[0].OK != 1 {
+		t.Fatalf("expected host stats, got %+v", hosts.Hosts[0])
+	}
 
 	rr = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/checks?host_name=missing", nil)
@@ -55,10 +58,17 @@ func TestHandleHostsAndChecks(t *testing.T) {
 	}
 
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/check?host_name=alpha&check_name=svc", nil)
-	srv.handleCheck(rr, req)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/checks?host_name=alpha", nil)
+	srv.handleChecks(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d", rr.Code)
+	}
+	var checksResp responseChecks
+	if err := json.NewDecoder(rr.Body).Decode(&checksResp); err != nil {
+		t.Fatalf("decode checks: %v", err)
+	}
+	if len(checksResp.Items) != 1 || checksResp.Items[0].Hostname != "alpha" {
+		t.Fatalf("unexpected checks response %+v", checksResp)
 	}
 }
 
