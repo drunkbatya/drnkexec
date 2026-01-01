@@ -91,8 +91,11 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 		output = err.Error()
 	}
 	statusForState := result.Status
-	if err != nil && statusForState == nrpeclient.StatusOK {
-		statusForState = nrpeclient.StatusUnknown
+	if statusForState == nrpeclient.StatusUnknown {
+		statusForState = nrpeclient.StatusCritical
+	}
+	if err != nil {
+		statusForState = nrpeclient.StatusCritical
 	}
 
 	failCount := 0

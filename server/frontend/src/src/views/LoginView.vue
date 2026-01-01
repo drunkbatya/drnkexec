@@ -43,21 +43,24 @@
             />
           </q-form>
         </q-card>
+        <q-inner-loading :showing="globalLoading" color="primary" size="64px" />
       </q-page>
     </q-page-container>
   </q-layout>
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { Notify } from "quasar";
 import { useRouter } from "vue-router";
 import { login as apiLogin } from "../services/api";
+import { activeRequests } from "../services/requestTracker";
 
 const login = ref("");
 const password = ref("");
 const loading = ref(false);
 const router = useRouter();
+const globalLoading = computed(() => activeRequests.value > 0);
 
 const onSubmit = async () => {
   loading.value = true;
@@ -65,11 +68,27 @@ const onSubmit = async () => {
     await apiLogin(login.value, password.value);
     router.push({ name: "main" });
   } catch (e) {
-    Notify.create({
-      type: "negative",
-      message: "Login error",
-    });
-    console.error(e);
+    const status = e?.response?.status;
+    const statusText = e?.response?.statusText || "Error";
+    const detail = e?.response?.data?.error || e?.response?.data?.message || e?.message;
+    if (status === 401 || status === 403) {
+      Notify.create({
+        type: "negative",
+        position: "bottom",
+        message: "Login error",
+        caption: detail || "Invalid credentials",
+        timeout: 6000,
+      });
+    } else {
+      Notify.create({
+        type: "negative",
+        position: "bottom",
+        message: `${status || ""} ${statusText}`.trim(),
+        caption: detail || "Request failed",
+        timeout: 6000,
+      });
+    }
+    console.error("login error", e);
   } finally {
     loading.value = false;
   }

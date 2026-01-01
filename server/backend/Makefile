@@ -6,6 +6,7 @@ APP_NAME ?= drnkexec-server
 CMD_PACKAGE := ./cmd/drnkexec
 TARGET := $(BIN_DIR)/$(APP_NAME)
 MODULE_PATH := github.com/drunkbatya/drnkexec
+CONFIG_FILE ?= src/example/config.yml
 
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 GIT_BRANCH := $(shell echo $${WORKFLOW_BRANCH_OR_TAG-$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)})
@@ -27,7 +28,7 @@ NON_DOC_GO := $(shell cd $(SRC_DIR) && find . -path './docs' -prune -o -name '*.
 NON_DOC_GO := $(addprefix $(SRC_DIR)/,$(filter-out ./docs/docs.go,$(NON_DOC_GO)))
 MOD_FILES := $(SRC_DIR)/go.mod $(SRC_DIR)/go.sum
 
-.PHONY: all build run clean test
+.PHONY: all build run clean test docker
 
 all: build
 
@@ -43,7 +44,7 @@ $(TARGET): $(DOCS) $(NON_DOC_GO) $(MOD_FILES)
 
 run: build
 	@echo "\tRUN\t$(TARGET)"
-	@./$(TARGET)
+	@./$(TARGET) --config $(CONFIG_FILE)
 
 test: $(DOCS)
 	@echo "\tTEST\t./..."
@@ -58,3 +59,18 @@ $(DOCS): $(NON_DOC_GO) $(MOD_FILES)
 clean:
 	@echo "\tRM\t$(BIN_DIR)"
 	@rm -rf $(BIN_DIR)
+	@echo "\tRM\t$(DOCS)"
+	@rm -rf $(DOCS)
+
+docker:
+	@echo "\tDOCKER\tbackend"
+	@docker buildx build \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg GIT_BRANCH=$(GIT_BRANCH) \
+		--build-arg GIT_BRANCH_NUM=$(GIT_BRANCH_NUM) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		--build-arg BUILD_VERSION=$(BUILD_VERSION) \
+		-t ghcr.io/drunkbatya/drnkexec-server:$(BUILD_VERSION) \
+		-f Dockerfile \
+		.

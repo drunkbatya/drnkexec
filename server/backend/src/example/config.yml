@@ -23,6 +23,17 @@ hosts:
     nrpe:
       tls:
         enabled: true
+  - name: MockHost
+    hostname: mock-01
+    resolve_to: 127.0.0.40
+    check_ping: true
+    labels:
+      - linux
+      - servers
+      - mock
+    nrpe:
+      tls:
+        enabled: true
 checks:
   - name: Uname
     command: check_uname

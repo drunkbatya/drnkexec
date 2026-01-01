@@ -20,6 +20,14 @@
         <q-btn
           flat
           dense
+          icon="menu_book"
+          label="API Docs"
+          href="/api/docs"
+          target="_blank"
+        />
+        <q-btn
+          flat
+          dense
           icon="logout"
           label="Logout"
           @click="handleLogout"
@@ -193,6 +201,7 @@
             </q-card>
           </q-tab-panel>
         </q-tab-panels>
+        <q-inner-loading :showing="globalLoading" color="primary" size="64px" />
       </q-page>
     </q-page-container>
   </q-layout>
@@ -204,8 +213,10 @@ import { useRouter } from "vue-router";
 import { Notify } from "quasar";
 import { fetchChecks, fetchHosts, logout, triggerCheckNow } from "../services/api";
 import { TABLE_BATCH_SIZE } from "../config";
+import { activeRequests } from "../services/requestTracker";
 
 const router = useRouter();
+const globalLoading = computed(() => activeRequests.value > 0);
 
 const activeTab = ref("hosts");
 const logoutLoading = ref(false);
