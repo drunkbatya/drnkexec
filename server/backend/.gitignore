@@ -1,0 +1,3 @@
+# Ignore generated swagger docs but keep directory
+docs/*
+!docs/.gitkeep

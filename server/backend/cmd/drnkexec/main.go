@@ -1,5 +1,16 @@
 package main
 
+//go:generate sh -c "PATH=$PATH:$(go env GOPATH)/bin swag init --parseInternal --parseDependency --generalInfo main.go --dir .,../../internal/httpserver --output ../../docs"
+
+// @title Drnkexec Monitoring API
+// @version 1.0
+// @description API for managing monitoring checks, downtimes and sessions.
+// @BasePath /
+// @schemes http https
+// @securityDefinitions.apikey SessionAuth
+// @in cookie
+// @name drnkexec_session
+
 import (
 	"context"
 	"flag"
@@ -7,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/drunkbatya/drnkexec/docs"
 	"github.com/drunkbatya/drnkexec/internal/alerts"
 	"github.com/drunkbatya/drnkexec/internal/config"
 	"github.com/drunkbatya/drnkexec/internal/downtime"

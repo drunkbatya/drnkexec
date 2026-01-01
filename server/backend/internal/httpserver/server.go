@@ -14,6 +14,7 @@ import (
 	"github.com/drunkbatya/drnkexec/internal/httpserver/session"
 	"github.com/drunkbatya/drnkexec/internal/model"
 	"github.com/drunkbatya/drnkexec/internal/state"
+	httpSwagger "github.com/swaggo/http-swagger"
 	"go.uber.org/zap"
 )
 
@@ -76,6 +77,10 @@ type checkNowRequest struct {
 	CheckName string `json:"check_name"`
 }
 
+type checkNowResponse struct {
+	Triggered bool `json:"triggered"`
+}
+
 func New(cfg model.HTTPConfig, admin model.AdminConfig, state *state.Manager, downtime *downtime.Manager, runner CheckRunner, logger *zap.SugaredLogger) *Server {
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	ttl := time.Duration(admin.SessionTTL) * time.Second
@@ -100,6 +105,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/admin/check", s.requireAuth(s.handleCheck))
 	mux.HandleFunc("/api/v1/admin/check/downtime", s.requireAuth(s.handleDowntime))
 	mux.HandleFunc("/api/v1/admin/check/now", s.requireAuth(s.handleCheckNow))
+	mux.HandleFunc("/api/docs", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/api/docs/", http.StatusTemporaryRedirect)
+	})
+	mux.Handle("/api/docs/", httpSwagger.Handler(httpSwagger.URL("/api/docs/doc.json")))
 	srv := &http.Server{Addr: s.addr, Handler: mux}
 	go func() {
 		<-ctx.Done()
@@ -115,6 +124,17 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
+// handleLogin godoc
+// @Summary Authenticate admin user
+// @Description Validates credentials and starts an authenticated session.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param credentials body loginRequest true "Login credentials"
+// @Success 200 {object} loginResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Router /api/v1/user/login [post]
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -142,6 +162,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, loginResponse{Login: req.Login})
 }
 
+// handleLogout godoc
+// @Summary Terminate current admin session
+// @Tags auth
+// @Produce json
+// @Security SessionAuth
+// @Success 200 {object} logoutResponse
+// @Failure 401 {object} errorResponse
+// @Failure 403 {object} errorResponse
+// @Router /api/v1/user/logout [post]
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -155,6 +184,19 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, logoutResponse{LoggedOut: true})
 }
 
+// handleCheckNow godoc
+// @Summary Trigger a check immediately
+// @Tags checks
+// @Accept json
+// @Produce json
+// @Security SessionAuth
+// @Param payload body checkNowRequest true "Target host and check"
+// @Success 202 {object} checkNowResponse
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 403 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/v1/admin/check/now [post]
 func (s *Server) handleCheckNow(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -177,11 +219,19 @@ func (s *Server) handleCheckNow(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	s.writeJSON(w, http.StatusAccepted, struct {
-		Triggered bool `json:"triggered"`
-	}{Triggered: true})
+	s.writeJSON(w, http.StatusAccepted, checkNowResponse{Triggered: true})
 }
 
+// handleHosts godoc
+// @Summary List monitored hosts
+// @Tags hosts
+// @Produce json
+// @Security SessionAuth
+// @Param page query int false "Page number (>=1)"
+// @Param page_size query int false "Page size (>=1)"
+// @Success 200 {object} responseHosts
+// @Failure 403 {object} errorResponse
+// @Router /api/v1/admin/hosts [get]
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -218,6 +268,19 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, data)
 }
 
+// handleChecks godoc
+// @Summary List checks with optional filters
+// @Tags checks
+// @Produce json
+// @Security SessionAuth
+// @Param host_name query string false "Filter by host"
+// @Param check_name query string false "Filter by check name"
+// @Param page query int false "Page number (>=1)"
+// @Param page_size query int false "Page size (>=1)"
+// @Success 200 {object} responseChecks
+// @Failure 403 {object} errorResponse
+// @Failure 404 {object} errorResponse "Host not found"
+// @Router /api/v1/admin/checks [get]
 func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -261,6 +324,18 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, responseChecks{Items: items, Page: page, PageSize: pageSize, Total: total})
 }
 
+// handleCheck godoc
+// @Summary Get details for a single check
+// @Tags checks
+// @Produce json
+// @Security SessionAuth
+// @Param host_name query string true "Host name"
+// @Param check_name query string true "Check name"
+// @Success 200 {object} responseCheck
+// @Failure 400 {object} errorResponse
+// @Failure 403 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Router /api/v1/admin/check [get]
 func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -314,6 +389,17 @@ type downtimeResponse struct {
 	To        int64  `json:"to"`
 }
 
+type downtimeDeleteResponse struct {
+	Removed string `json:"removed"`
+}
+
+type downtimeListResponse struct {
+	Items    []downtimeResponse `json:"items"`
+	Page     int                `json:"page"`
+	PageSize int                `json:"page_size"`
+	Total    int                `json:"total"`
+}
+
 func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
@@ -327,6 +413,18 @@ func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleDowntimeDelete godoc
+// @Summary Remove a downtime entry
+// @Tags downtime
+// @Accept json
+// @Produce json
+// @Security SessionAuth
+// @Param payload body downtimeRequest true "Downtime filter"
+// @Success 200 {object} downtimeDeleteResponse
+// @Failure 400 {object} errorResponse
+// @Failure 403 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Router /api/v1/admin/check/downtime [delete]
 func (s *Server) handleDowntimeDelete(w http.ResponseWriter, r *http.Request) {
 	var req downtimeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -346,11 +444,20 @@ func (s *Server) handleDowntimeDelete(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "downtime not found")
 		return
 	}
-	s.writeJSON(w, http.StatusOK, struct {
-		Removed string `json:"removed"`
-	}{Removed: req.Name})
+	s.writeJSON(w, http.StatusOK, downtimeDeleteResponse{Removed: req.Name})
 }
 
+// handleDowntimeCreate godoc
+// @Summary Schedule downtime for checks
+// @Tags downtime
+// @Accept json
+// @Produce json
+// @Security SessionAuth
+// @Param payload body downtimeRequest true "Downtime definition"
+// @Success 201 {object} downtimeResponse
+// @Failure 400 {object} errorResponse
+// @Failure 403 {object} errorResponse
+// @Router /api/v1/admin/check/downtime [post]
 func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {
 	var req downtimeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -374,6 +481,19 @@ func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusCreated, toDowntimeResponse(entry))
 }
 
+// handleDowntimeList godoc
+// @Summary List active downtime entries
+// @Tags downtime
+// @Produce json
+// @Security SessionAuth
+// @Param host_name query string false "Filter by host"
+// @Param check_name query string false "Filter by check"
+// @Param name query string false "Filter by downtime name"
+// @Param page query int false "Page number (>=1)"
+// @Param page_size query int false "Page size (>=1)"
+// @Success 200 {object} downtimeListResponse
+// @Failure 403 {object} errorResponse
+// @Router /api/v1/admin/check/downtime [get]
 func (s *Server) handleDowntimeList(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	host := query.Get("host_name")
@@ -401,12 +521,7 @@ func (s *Server) handleDowntimeList(w http.ResponseWriter, r *http.Request) {
 	for _, entry := range entries[start:end] {
 		items = append(items, toDowntimeResponse(entry))
 	}
-	s.writeJSON(w, http.StatusOK, struct {
-		Items    []downtimeResponse `json:"items"`
-		Page     int                `json:"page"`
-		PageSize int                `json:"page_size"`
-		Total    int                `json:"total"`
-	}{Items: items, Page: page, PageSize: pageSize, Total: total})
+	s.writeJSON(w, http.StatusOK, downtimeListResponse{Items: items, Page: page, PageSize: pageSize, Total: total})
 }
 
 func toDowntimeResponse(entry downtime.Entry) downtimeResponse {
