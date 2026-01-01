@@ -48,7 +48,7 @@
                   flat
                   dense
                   icon="refresh"
-                  @click="loadHosts"
+                  @click="refreshHosts"
                   :loading="loadingHosts"
                 />
               </q-card-section>
@@ -452,7 +452,8 @@ onMounted(() => {
   loadChecks();
 });
 
-async function loadHosts(nextPage) {
+async function loadHosts(nextPage, options = {}) {
+  const refreshOpen = options.refreshOpen === true;
   if (typeof nextPage === "number") {
     hostPagination.page = nextPage;
   }
@@ -469,14 +470,25 @@ async function loadHosts(nextPage) {
     if (page > maxPage && maxPage > 0) {
       hostPagination.page = maxPage;
       if (maxPage !== page) {
-        await loadHosts(maxPage);
+        await loadHosts(maxPage, options);
+        return;
       }
+    }
+    if (refreshOpen) {
+      const expandedHosts = hosts.value
+        .filter((host) => hostExpanded[host.Hostname])
+        .map((host) => host.Hostname);
+      await Promise.all(expandedHosts.map((hostname) => loadHostChecks(hostname, getHostChecksState(hostname).page)));
     }
   } catch (err) {
     console.error("load hosts", err);
   } finally {
     loadingHosts.value = false;
   }
+}
+
+function refreshHosts() {
+  loadHosts(undefined, { refreshOpen: true });
 }
 
 function changeHostPage(nextPage) {
