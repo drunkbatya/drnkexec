@@ -213,6 +213,20 @@
               </q-card-section>
               <q-separator />
               <div class="q-pa-md">
+                <q-input
+                  v-model="checkSearch"
+                  label="Filter by check name"
+                  dense
+                  outlined
+                  clearable
+                  debounce="0"
+                  @update:model-value="handleCheckSearchInput"
+                  class="q-mb-md"
+                >
+                  <template #prepend>
+                    <q-icon name="search" />
+                  </template>
+                </q-input>
                 <div v-if="loadingChecks" class="text-center q-my-lg">
                   <q-spinner-dots color="primary" size="2rem" />
                 </div>
@@ -383,6 +397,8 @@ const defaultHostChecksState = {
 };
 const hostSearch = ref("");
 let hostSearchTimer;
+const checkSearch = ref("");
+let checkSearchTimer;
 
 const checkPagination = reactive({
   page: 1,
@@ -519,7 +535,7 @@ async function loadHosts(nextPage, options = {}) {
   const offset = (page - 1) * perPage;
   loadingHosts.value = true;
   try {
-    const pattern = buildHostSearchPattern(hostSearch.value);
+    const pattern = buildSearchPattern(hostSearch.value);
     const data = await fetchHosts({ count: perPage, offset, hostNameSearch: pattern });
     hosts.value = data.hosts || [];
     hostPagination.count = data.count ?? hosts.value.length;
@@ -563,6 +579,16 @@ function handleHostSearchInput() {
   }, 200);
 }
 
+function handleCheckSearchInput() {
+  if (checkSearchTimer) {
+    clearTimeout(checkSearchTimer);
+  }
+  checkSearchTimer = setTimeout(() => {
+    checkPagination.page = 1;
+    loadCheckSummaries();
+  }, 200);
+}
+
 async function loadCheckSummaries(nextPage, options = {}) {
   const refreshOpen = options.refreshOpen === true;
   if (typeof nextPage === "number") {
@@ -573,9 +599,11 @@ async function loadCheckSummaries(nextPage, options = {}) {
   const offset = (page - 1) * perPage;
   loadingChecks.value = true;
   try {
+    const pattern = buildSearchPattern(checkSearch.value);
     const data = await fetchCheckSummaries({
       count: perPage,
       offset,
+      checkNameSearch: pattern,
     });
     checkSummaries.value = data.checks || [];
     checkPagination.count = data.count ?? checkSummaries.value.length;
@@ -864,7 +892,7 @@ function formattedDate(value, absoluteMode) {
   return formatRelative(value);
 }
 
-function buildHostSearchPattern(value) {
+function buildSearchPattern(value) {
   const query = typeof value === "string" ? value.trim() : "";
   if (!query) {
     return "";

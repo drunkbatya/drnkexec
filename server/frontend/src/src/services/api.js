@@ -103,13 +103,16 @@ export async function fetchHosts({ count, offset, hostNameSearch } = {}) {
   return res.data;
 }
 
-export async function fetchCheckSummaries({ count, offset } = {}) {
+export async function fetchCheckSummaries({ count, offset, checkNameSearch } = {}) {
   const params = {};
   if (typeof count === "number") {
     params.count = count;
   }
   if (typeof offset === "number") {
     params.offset = offset;
+  }
+  if (checkNameSearch) {
+    params.check_name_search = checkNameSearch;
   }
   const res = await protectedApi.get("/checks", { params });
   return res.data;

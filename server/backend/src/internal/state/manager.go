@@ -211,13 +211,29 @@ func (m *Manager) Check(hostname, checkname string) (CheckInfo, bool) {
 }
 
 func (m *Manager) CheckSummaries() []CheckSummary {
+	return m.CheckSummariesFiltered("")
+}
+
+func (m *Manager) CheckSummariesFiltered(pattern string) []CheckSummary {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	var matcher func(string) bool
+	if pattern != "" {
+		re, err := regexp.Compile(pattern)
+		if err == nil {
+			matcher = re.MatchString
+		} else {
+			matcher = func(s string) bool { return strings.HasPrefix(s, pattern) }
+		}
+	}
 	summaryMap := make(map[string]*CheckSummary)
 	names := make([]string, 0)
 	for _, hostname := range m.hostOrder {
 		checks := m.hostChecks[hostname]
 		for checkName, info := range checks {
+			if matcher != nil && !matcher(checkName) {
+				continue
+			}
 			summary, ok := summaryMap[checkName]
 			if !ok {
 				summary = &CheckSummary{CheckName: checkName}

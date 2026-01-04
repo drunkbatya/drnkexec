@@ -312,6 +312,7 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 // @Security SessionAuth
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
+// @Param check_name_search query string false "Regex or prefix filter by check name"
 // @Success 200 {object} responseCheckSummaries
 // @Failure 403 {object} errorResponse
 // @Router /api/v1/admin/checks [get]
@@ -329,7 +330,8 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	summaries := s.state.CheckSummaries()
+	checkNameFilter := query.Get("check_name_search")
+	summaries := s.state.CheckSummariesFiltered(checkNameFilter)
 	total := len(summaries)
 	if offset > total {
 		offset = total
