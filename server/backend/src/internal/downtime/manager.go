@@ -47,6 +47,35 @@ func (m *Manager) Remove(host, check, name string) bool {
 	}
 }
 
+func (m *Manager) RemoveByName(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if name == "" {
+		return false
+	}
+	for host, bucket := range m.hostEntries {
+		if entry, ok := bucket[name]; ok {
+			delete(bucket, name)
+			m.logDowntimeRemoved(entry)
+			if len(bucket) == 0 {
+				delete(m.hostEntries, host)
+			}
+			return true
+		}
+	}
+	for key, bucket := range m.entries {
+		if entry, ok := bucket[name]; ok {
+			delete(bucket, name)
+			m.logDowntimeRemoved(entry)
+			if len(bucket) == 0 {
+				delete(m.entries, key)
+			}
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Manager) Add(host, check, name string, from, to time.Time) (Entry, error) {
 	if !to.After(from) {
 		return Entry{}, fmt.Errorf("to must be after from")

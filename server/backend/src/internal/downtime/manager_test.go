@@ -56,3 +56,31 @@ func TestRemoveEntries(t *testing.T) {
 		t.Fatalf("expected remove check")
 	}
 }
+
+func TestRemoveByName(t *testing.T) {
+	logger := zaptest.NewLogger(t).Sugar()
+	mgr := NewManager(logger)
+	now := time.Now()
+	if _, err := mgr.Add("hostA", "checkA", "entry-check", now.Add(-time.Minute), now.Add(time.Minute)); err != nil {
+		t.Fatalf("add check failed: %v", err)
+	}
+	if _, err := mgr.AddHost("hostB", "entry-host", now.Add(-time.Minute), now.Add(time.Minute)); err != nil {
+		t.Fatalf("add host failed: %v", err)
+	}
+	if _, err := mgr.Add("", "", "entry-global", now.Add(-time.Minute), now.Add(time.Minute)); err != nil {
+		t.Fatalf("add global failed: %v", err)
+	}
+
+	if !mgr.RemoveByName("entry-check") {
+		t.Fatalf("expected remove by name for check scope")
+	}
+	if !mgr.RemoveByName("entry-host") {
+		t.Fatalf("expected remove by name for host scope")
+	}
+	if !mgr.RemoveByName("entry-global") {
+		t.Fatalf("expected remove by name for global scope")
+	}
+	if mgr.RemoveByName("missing") {
+		t.Fatalf("expected missing name removal to fail")
+	}
+}

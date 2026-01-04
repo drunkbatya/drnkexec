@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/downtime"
 	"github.com/drunkbatya/drnkexec/internal/model"
@@ -90,10 +92,21 @@ func TestHandleDowntimeLifecycle(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	body := bytes.NewBufferString(`{"name":"maint","host_name":"alpha","duration":5}`)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/downtime", body)
-	srv.handleDowntime(rr, req)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/downtime/relative", body)
+	srv.handleDowntimeRelative(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("unexpected status %d", rr.Code)
+	}
+
+	now := time.Now().Unix()
+	absPayload := bytes.NewBufferString(
+		fmt.Sprintf(`{"name":"maint-abs","host_name":"alpha","from":%d,"till":%d}`, now, now+10),
+	)
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/downtime/absolute", absPayload)
+	srv.handleDowntimeAbsolute(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("unexpected status %d on absolute", rr.Code)
 	}
 
 	rr = httptest.NewRecorder()
@@ -108,16 +121,41 @@ func TestHandleDowntimeLifecycle(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].Name != "maint" {
-		t.Fatalf("unexpected downtime response %+v", resp)
+	if len(resp.Items) < 2 {
+		t.Fatalf("expected at least 2 downtime entries, got %+v", resp)
 	}
 
-	delBody := bytes.NewBufferString(`{"name":"maint","host_name":"alpha"}`)
+	delBody := bytes.NewBufferString(`{"name":"maint"}`)
 	rr = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodDelete, "/api/v1/admin/downtime", delBody)
 	srv.handleDowntime(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d on delete", rr.Code)
+	}
+}
+
+func TestHandleDowntimeRelativeAllHosts(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	body := bytes.NewBufferString(`{"name":"maint-check","check_name":"svc","duration":5}`)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/downtime/relative", body)
+	srv.handleDowntimeRelative(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("unexpected status %d", rr.Code)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/downtime?check_name=svc", nil)
+	srv.handleDowntime(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d", rr.Code)
+	}
+	var resp downtimeListResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Items) == 0 || resp.Items[0].HostName == "" {
+		t.Fatalf("expected downtime entries for hosts, got %+v", resp)
 	}
 }
 

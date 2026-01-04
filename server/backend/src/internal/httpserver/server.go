@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -114,6 +113,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/admin/checks", s.requireAuth(s.handleChecks))
 	mux.HandleFunc("/api/v1/admin/checks/detail", s.requireAuth(s.handleCheckDetails))
 	mux.HandleFunc("/api/v1/admin/downtime", s.requireAuth(s.handleDowntime))
+	mux.HandleFunc("/api/v1/admin/downtime/relative", s.requireAuth(s.handleDowntimeRelative))
+	mux.HandleFunc("/api/v1/admin/downtime/absolute", s.requireAuth(s.handleDowntimeAbsolute))
 	mux.HandleFunc("/api/v1/admin/check/now", s.requireAuth(s.handleCheckNow))
 	docsRoot := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/api/docs/", http.StatusTemporaryRedirect)
@@ -399,24 +400,27 @@ type downtimeRequest struct {
 	CheckName string `json:"check_name"`
 	Name      string `json:"name"`
 	From      *int64 `json:"from"`
-	To        *int64 `json:"to"`
+	Till      *int64 `json:"till"`
 	Duration  *int64 `json:"duration"`
 }
 
-func (r downtimeRequest) timeRange(now time.Time) (time.Time, time.Time, error) {
-	if r.Duration != nil && *r.Duration > 0 {
-		start := now
-		return start, start.Add(time.Duration(*r.Duration) * time.Second), nil
-	}
-	if r.From != nil && r.To != nil {
-		start := time.Unix(*r.From, 0)
-		end := time.Unix(*r.To, 0)
-		if !end.After(start) {
-			return time.Time{}, time.Time{}, fmt.Errorf("to must be after from")
-		}
-		return start, end, nil
-	}
-	return time.Time{}, time.Time{}, errors.New("either duration or from/to must be provided")
+type downtimeDeleteRequest struct {
+	Name string `json:"name"`
+}
+
+type downtimeRelativeRequest struct {
+	HostName  string `json:"host_name"`
+	CheckName string `json:"check_name"`
+	Name      string `json:"name"`
+	Duration  *int64 `json:"duration"`
+}
+
+type downtimeAbsoluteRequest struct {
+	HostName  string `json:"host_name"`
+	CheckName string `json:"check_name"`
+	Name      string `json:"name"`
+	From      *int64 `json:"from"`
+	Till      *int64 `json:"till"`
 }
 
 type downtimeResponse struct {
@@ -425,6 +429,10 @@ type downtimeResponse struct {
 	CheckName string `json:"check_name"`
 	From      int64  `json:"from"`
 	To        int64  `json:"to"`
+}
+
+type downtimeCreateResponse struct {
+	Items []downtimeResponse `json:"items"`
 }
 
 type downtimeDeleteResponse struct {
@@ -439,8 +447,6 @@ type downtimeListResponse struct {
 
 func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
-	case http.MethodPost:
-		s.handleDowntimeCreate(w, r)
 	case http.MethodDelete:
 		s.handleDowntimeDelete(w, r)
 	case http.MethodGet:
@@ -456,14 +462,14 @@ func (s *Server) handleDowntime(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Produce json
 // @Security SessionAuth
-// @Param payload body downtimeRequest true "Downtime filter"
+// @Param payload body downtimeDeleteRequest true "Downtime identifier"
 // @Success 200 {object} downtimeDeleteResponse
 // @Failure 400 {object} errorResponse
 // @Failure 403 {object} errorResponse
 // @Failure 404 {object} errorResponse
 // @Router /api/v1/admin/downtime [delete]
 func (s *Server) handleDowntimeDelete(w http.ResponseWriter, r *http.Request) {
-	var req downtimeRequest
+	var req downtimeDeleteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid json")
 		return
@@ -472,11 +478,7 @@ func (s *Server) handleDowntimeDelete(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if req.HostName == "" && req.CheckName != "" {
-		s.writeError(w, http.StatusBadRequest, "host_name is required when check_name is provided")
-		return
-	}
-	removed := s.downtime.Remove(req.HostName, req.CheckName, req.Name)
+	removed := s.downtime.RemoveByName(req.Name)
 	if !removed {
 		s.writeError(w, http.StatusNotFound, "downtime not found")
 		return
@@ -484,19 +486,23 @@ func (s *Server) handleDowntimeDelete(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, downtimeDeleteResponse{Removed: req.Name})
 }
 
-// handleDowntimeCreate godoc
-// @Summary Schedule downtime for checks
+// handleDowntimeRelative godoc
+// @Summary Schedule downtime with relative duration
 // @Tags downtimes
 // @Accept json
 // @Produce json
 // @Security SessionAuth
-// @Param payload body downtimeRequest true "Downtime definition"
-// @Success 201 {object} downtimeResponse
+// @Param payload body downtimeRelativeRequest true "Downtime definition (duration required)"
+// @Success 201 {object} downtimeCreateResponse
 // @Failure 400 {object} errorResponse
 // @Failure 403 {object} errorResponse
-// @Router /api/v1/admin/downtime [post]
-func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {
-	var req downtimeRequest
+// @Router /api/v1/admin/downtime/relative [post]
+func (s *Server) handleDowntimeRelative(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req downtimeRelativeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid json")
 		return
@@ -505,17 +511,65 @@ func (s *Server) handleDowntimeCreate(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	fromTime, toTime, err := req.timeRange(time.Now())
+	if req.Duration == nil || *req.Duration <= 0 {
+		s.writeError(w, http.StatusBadRequest, "duration must be greater than zero")
+		return
+	}
+	now := time.Now()
+	toTime := now.Add(time.Duration(*req.Duration) * time.Second)
+	items, err := s.createDowntimeEntries(req.HostName, req.CheckName, req.Name, now, toTime)
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	entry, err := s.downtime.Add(req.HostName, req.CheckName, req.Name, fromTime, toTime)
+	s.writeJSON(w, http.StatusCreated, downtimeCreateResponse{Items: items})
+}
+
+// handleDowntimeAbsolute godoc
+// @Summary Schedule downtime with absolute timestamps
+// @Tags downtimes
+// @Accept json
+// @Produce json
+// @Security SessionAuth
+// @Param payload body downtimeAbsoluteRequest true "Downtime definition (from/till required)"
+// @Success 201 {object} downtimeCreateResponse
+// @Failure 400 {object} errorResponse
+// @Failure 403 {object} errorResponse
+// @Router /api/v1/admin/downtime/absolute [post]
+func (s *Server) handleDowntimeAbsolute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req downtimeAbsoluteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.Name == "" {
+		s.writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if req.From == nil {
+		s.writeError(w, http.StatusBadRequest, "from is required")
+		return
+	}
+	if req.Till == nil {
+		s.writeError(w, http.StatusBadRequest, "till is required")
+		return
+	}
+	fromTime := time.Unix(*req.From, 0)
+	toTime := time.Unix(*req.Till, 0)
+	if !toTime.After(fromTime) {
+		s.writeError(w, http.StatusBadRequest, "till must be after from")
+		return
+	}
+	items, err := s.createDowntimeEntries(req.HostName, req.CheckName, req.Name, fromTime, toTime)
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.writeJSON(w, http.StatusCreated, toDowntimeResponse(entry))
+	s.writeJSON(w, http.StatusCreated, downtimeCreateResponse{Items: items})
 }
 
 // handleDowntimeList godoc
@@ -558,6 +612,34 @@ func (s *Server) handleDowntimeList(w http.ResponseWriter, r *http.Request) {
 		items = append(items, toDowntimeResponse(entry))
 	}
 	s.writeJSON(w, http.StatusOK, downtimeListResponse{Items: items, Count: len(items), Total: total})
+}
+
+func (s *Server) createDowntimeEntries(hostName, checkName, name string, fromTime, toTime time.Time) ([]downtimeResponse, error) {
+	if hostName == "" && checkName != "" {
+		summaries := s.state.HostSummaries()
+		if len(summaries) == 0 {
+			return nil, errors.New("no hosts available for downtime")
+		}
+		created := make([]downtime.Entry, 0, len(summaries))
+		responses := make([]downtimeResponse, 0, len(summaries))
+		for _, summary := range summaries {
+			entry, err := s.downtime.Add(summary.Hostname, checkName, name, fromTime, toTime)
+			if err != nil {
+				for _, added := range created {
+					s.downtime.Remove(added.HostName, added.CheckName, added.Name)
+				}
+				return nil, err
+			}
+			created = append(created, entry)
+			responses = append(responses, toDowntimeResponse(entry))
+		}
+		return responses, nil
+	}
+	entry, err := s.downtime.Add(hostName, checkName, name, fromTime, toTime)
+	if err != nil {
+		return nil, err
+	}
+	return []downtimeResponse{toDowntimeResponse(entry)}, nil
 }
 
 func toDowntimeResponse(entry downtime.Entry) downtimeResponse {
