@@ -54,6 +54,20 @@
               </q-card-section>
               <q-separator />
               <div class="q-pa-md">
+                <q-input
+                  v-model="hostSearch"
+                  label="Filter by host name"
+                  dense
+                  outlined
+                  clearable
+                  debounce="0"
+                  @update:model-value="handleHostSearchInput"
+                  class="q-mb-md"
+                >
+                  <template #prepend>
+                    <q-icon name="search" />
+                  </template>
+                </q-input>
                 <div v-if="loadingHosts" class="text-center q-my-lg">
                   <q-spinner-dots color="primary" size="2rem" />
                 </div>
@@ -367,6 +381,8 @@ const defaultHostChecksState = {
   items: [],
   loading: false,
 };
+const hostSearch = ref("");
+let hostSearchTimer;
 
 const checkPagination = reactive({
   page: 1,
@@ -503,7 +519,8 @@ async function loadHosts(nextPage, options = {}) {
   const offset = (page - 1) * perPage;
   loadingHosts.value = true;
   try {
-    const data = await fetchHosts({ count: perPage, offset });
+    const pattern = buildHostSearchPattern(hostSearch.value);
+    const data = await fetchHosts({ count: perPage, offset, hostNameSearch: pattern });
     hosts.value = data.hosts || [];
     hostPagination.count = data.count ?? hosts.value.length;
     hostPagination.rowsNumber = data.total ?? hostPagination.count;
@@ -534,6 +551,16 @@ function refreshHosts() {
 
 function changeHostPage(nextPage) {
   loadHosts(nextPage);
+}
+
+function handleHostSearchInput() {
+  if (hostSearchTimer) {
+    clearTimeout(hostSearchTimer);
+  }
+  hostSearchTimer = setTimeout(() => {
+    hostPagination.page = 1;
+    loadHosts();
+  }, 200);
 }
 
 async function loadCheckSummaries(nextPage, options = {}) {
@@ -835,6 +862,22 @@ function formattedDate(value, absoluteMode) {
     return formatAbsolute(value);
   }
   return formatRelative(value);
+}
+
+function buildHostSearchPattern(value) {
+  const query = typeof value === "string" ? value.trim() : "";
+  if (!query) {
+    return "";
+  }
+  try {
+    // Valid regex stays untouched so advanced users can provide anchors, groups, etc.
+    // eslint-disable-next-line no-new
+    new RegExp(query);
+    return query;
+  } catch (err) {
+    const escaped = query.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/-/g, "\\-");
+    return escaped.replace(/\*/g, ".*");
+  }
 }
 
 function formatRelative(value) {

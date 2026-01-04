@@ -1,6 +1,7 @@
 package state
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -112,10 +113,26 @@ func (m *Manager) Update(assignment model.CheckAssignment, status nrpeclient.Sta
 }
 
 func (m *Manager) HostSummaries() []HostSummary {
+	return m.HostSummariesFiltered("")
+}
+
+func (m *Manager) HostSummariesFiltered(pattern string) []HostSummary {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make([]HostSummary, 0, len(m.hostOrder))
+	var matcher func(string) bool
+	if pattern != "" {
+		re, err := regexp.Compile(pattern)
+		if err == nil {
+			matcher = re.MatchString
+		} else {
+			matcher = func(s string) bool { return strings.HasPrefix(s, pattern) }
+		}
+	}
 	for _, hostname := range m.hostOrder {
+		if matcher != nil && !matcher(hostname) {
+			continue
+		}
 		result = append(result, m.buildHostSummaryLocked(hostname))
 	}
 	return result

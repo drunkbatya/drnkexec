@@ -272,6 +272,7 @@ func (s *Server) handleAppVersion(w http.ResponseWriter, r *http.Request) {
 // @Security SessionAuth
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
+// @Param host_name_search query string false "Filter hosts starting with this prefix"
 // @Success 200 {object} responseHosts
 // @Failure 403 {object} errorResponse
 // @Router /api/v1/admin/hosts [get]
@@ -289,7 +290,8 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	all := s.state.HostSummaries()
+	prefix := query.Get("host_name_search")
+	all := s.state.HostSummariesFiltered(prefix)
 	total := len(all)
 	if offset > total {
 		offset = total

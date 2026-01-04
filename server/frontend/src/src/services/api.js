@@ -88,13 +88,16 @@ export async function logout() {
   await userApi.post("/logout");
 }
 
-export async function fetchHosts({ count, offset } = {}) {
+export async function fetchHosts({ count, offset, hostNameSearch } = {}) {
   const params = {};
   if (typeof count === "number") {
     params.count = count;
   }
   if (typeof offset === "number") {
     params.offset = offset;
+  }
+  if (hostNameSearch) {
+    params.host_name_search = hostNameSearch;
   }
   const res = await protectedApi.get("/hosts", { params });
   return res.data;
