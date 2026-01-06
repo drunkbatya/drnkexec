@@ -161,6 +161,52 @@ export async function fetchCheckDetails({ count, offset, hostName, checkName, st
   return res.data;
 }
 
+export async function deleteDowntime(name) {
+  await protectedApi.delete("/downtime", {
+    data: { name },
+  });
+}
+
+export async function fetchDowntimes({ count, offset, hostName, checkName, name } = {}) {
+  const params = {};
+  if (typeof count === "number") {
+    params.count = count;
+  }
+  if (typeof offset === "number") {
+    params.offset = offset;
+  }
+  if (hostName) {
+    params.host_name = hostName;
+  }
+  if (checkName) {
+    params.check_name = checkName;
+  }
+  if (name) {
+    params.name = name;
+  }
+  const res = await protectedApi.get("/downtime", { params });
+  return res.data;
+}
+
+export async function createDowntimeRelative({ hostName, checkName, name, duration }) {
+  await protectedApi.post("/downtime/relative", {
+    host_name: hostName,
+    check_name: checkName,
+    name,
+    duration,
+  });
+}
+
+export async function createDowntimeAbsolute({ hostName, checkName, name, from, till }) {
+  await protectedApi.post("/downtime/absolute", {
+    host_name: hostName,
+    check_name: checkName,
+    name,
+    from,
+    till,
+  });
+}
+
 export async function triggerCheckNow(hostName, checkName) {
   await protectedApi.post("/check/now", {
     host_name: hostName,

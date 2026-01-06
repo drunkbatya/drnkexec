@@ -2,7 +2,9 @@ package downtime
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,6 +126,9 @@ func (m *Manager) ActiveHost(host string, now time.Time) bool {
 func (m *Manager) List(hostFilter, checkFilter, nameFilter string, now time.Time) []Entry {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	hostMatcher := buildMatcher(hostFilter)
+	checkMatcher := buildMatcher(checkFilter)
+	nameMatcher := buildMatcher(nameFilter)
 	var result []Entry
 	for key, bucket := range m.entries {
 		if key == "::" {
@@ -134,7 +139,7 @@ func (m *Manager) List(hostFilter, checkFilter, nameFilter string, now time.Time
 				m.expireEntry(bucket, name, entry)
 				continue
 			}
-			if matchesFilter(entry, hostFilter, checkFilter, nameFilter) {
+			if matchesFilter(entry, hostMatcher, checkMatcher, nameMatcher) {
 				result = append(result, entry)
 			}
 		}
@@ -148,7 +153,7 @@ func (m *Manager) List(hostFilter, checkFilter, nameFilter string, now time.Time
 				m.expireEntry(bucket, name, entry)
 				continue
 			}
-			if matchesFilter(entry, hostFilter, checkFilter, nameFilter) {
+			if matchesFilter(entry, hostMatcher, checkMatcher, nameMatcher) {
 				result = append(result, entry)
 			}
 		}
@@ -162,10 +167,9 @@ func (m *Manager) List(hostFilter, checkFilter, nameFilter string, now time.Time
 				m.expireEntry(bucket, name, entry)
 				continue
 			}
-			if matchesFilter(entry, hostFilter, checkFilter, nameFilter) {
+			if matchesFilter(entry, hostMatcher, checkMatcher, nameMatcher) {
 				result = append(result, entry)
 			}
-			continue
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -180,17 +184,29 @@ func (m *Manager) List(hostFilter, checkFilter, nameFilter string, now time.Time
 	return result
 }
 
-func matchesFilter(entry Entry, hostFilter, checkFilter, nameFilter string) bool {
-	if hostFilter != "" && entry.HostName != hostFilter {
+func matchesFilter(entry Entry, hostMatcher, checkMatcher, nameMatcher func(string) bool) bool {
+	if hostMatcher != nil && !hostMatcher(entry.HostName) {
 		return false
 	}
-	if checkFilter != "" && entry.CheckName != checkFilter {
+	if checkMatcher != nil && !checkMatcher(entry.CheckName) {
 		return false
 	}
-	if nameFilter != "" && entry.Name != nameFilter {
+	if nameMatcher != nil && !nameMatcher(entry.Name) {
 		return false
 	}
 	return true
+}
+
+func buildMatcher(pattern string) func(string) bool {
+	if pattern == "" {
+		return nil
+	}
+	if re, err := regexp.Compile(pattern); err == nil {
+		return re.MatchString
+	}
+	return func(value string) bool {
+		return strings.HasPrefix(value, pattern)
+	}
 }
 
 func buildKey(host, check string) string {

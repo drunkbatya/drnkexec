@@ -15,6 +15,7 @@
         >
           <q-tab name="hosts" label="Hosts" />
           <q-tab name="checks" label="Checks" />
+          <q-tab name="downtimes" label="Downtimes" />
         </q-tabs>
         <q-space />
         <q-btn
@@ -402,10 +403,179 @@
               </div>
             </q-card>
           </q-tab-panel>
+
+          <q-tab-panel name="downtimes" class="q-pa-none">
+            <q-card flat bordered>
+              <q-card-section class="row items-center">
+                <div class="text-h6">Downtimes</div>
+                <q-space />
+                <q-btn
+                  color="primary"
+                  flat
+                  dense
+                  icon="add"
+                  label="Create Downtime"
+                  @click="openDowntimeDialog"
+                />
+                <q-btn
+                  class="q-ml-sm"
+                  flat
+                  dense
+                  icon="refresh"
+                  @click="refreshDowntimes"
+                  :loading="loadingDowntimes"
+                />
+              </q-card-section>
+              <q-separator />
+              <div class="q-pa-md">
+                <div class="row q-col-gutter-md q-mb-md">
+                  <div class="col-12 col-md-6">
+                    <q-input
+                      v-model="downtimeNameFilter"
+                      label="Filter by downtime name"
+                      dense
+                      outlined
+                      clearable
+                      debounce="0"
+                      @update:model-value="handleDowntimeFilterInput"
+                    >
+                      <template #prepend>
+                        <q-icon name="search" />
+                      </template>
+                    </q-input>
+                  </div>
+                </div>
+                <div v-if="loadingDowntimes" class="text-center q-my-lg">
+                  <q-spinner-dots color="primary" size="2rem" />
+                </div>
+                <div v-else-if="downtimes.length === 0" class="text-grey-7 text-center">
+                  No downtimes to display
+                </div>
+                <q-table
+                  v-else
+                  flat
+                  dense
+                  :rows="downtimes"
+                  :columns="downtimeColumns"
+                  row-key="name"
+                  hide-bottom
+                >
+                  <template #body-cell-actions="props">
+                    <q-td :props="props">
+                      <q-btn
+                        size="sm"
+                        flat
+                        color="negative"
+                        icon="delete"
+                        @click="promptDowntimeDelete(props.row)"
+                      />
+                    </q-td>
+                  </template>
+                </q-table>
+              </div>
+              <q-separator />
+              <div class="row justify-between items-center q-pa-sm">
+                <div class="text-caption text-grey-7">
+                  Showing {{ downtimePagination.count }} of {{ downtimePagination.rowsNumber }} downtimes
+                </div>
+                <q-pagination
+                  v-model="downtimePagination.page"
+                  :max="downtimeMaxPage"
+                  color="primary"
+                  boundary-numbers
+                  :max-pages="6"
+                  dense
+                  @update:model-value="changeDowntimePage"
+                />
+              </div>
+            </q-card>
+          </q-tab-panel>
         </q-tab-panels>
         <q-inner-loading :showing="globalLoading" color="primary" size="64px" />
       </q-page>
     </q-page-container>
+
+    <q-dialog v-model="downtimeDialog.open" persistent>
+      <q-card style="min-width: 320px; max-width: 600px;">
+        <q-card-section class="text-h6">Create Downtime</q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-input v-model="downtimeDialog.name" label="Name" dense outlined />
+          <q-input v-model="downtimeDialog.hostName" label="Host (optional)" dense outlined />
+          <q-input v-model="downtimeDialog.checkName" label="Check (optional)" dense outlined />
+          <div>
+            <div class="text-caption text-grey-7 q-mb-xs">Time Range</div>
+            <q-btn-toggle
+              v-model="downtimeDialog.mode"
+              spread
+              dense
+              unelevated
+              color="primary"
+              text-color="white"
+              :options="[
+                { label: 'Relative', value: 'relative' },
+                { label: 'Absolute', value: 'absolute' },
+              ]"
+            />
+          </div>
+          <div v-if="downtimeDialog.mode === 'relative'">
+            <q-input
+              v-model.number="downtimeDialog.duration"
+              type="number"
+              label="Duration (seconds)"
+              dense
+              outlined
+              min="1"
+            />
+          </div>
+          <div v-else class="row q-col-gutter-md">
+            <div class="col-12 col-md-6">
+              <q-input
+                v-model="downtimeDialog.from"
+                type="datetime-local"
+                label="From"
+                dense
+                outlined
+              />
+            </div>
+            <div class="col-12 col-md-6">
+              <q-input
+                v-model="downtimeDialog.to"
+                type="datetime-local"
+                label="To"
+                dense
+                outlined
+              />
+            </div>
+          </div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" :disable="downtimeDialog.submitting" @click="closeDowntimeDialog" />
+          <q-btn
+            color="primary"
+            label="Create"
+            :loading="downtimeDialog.submitting"
+            @click="submitDowntime"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="downtimeDeleteDialog.open">
+      <q-card style="min-width: 300px;">
+        <q-card-section class="text-h6">Delete Downtime</q-card-section>
+        <q-card-section>
+          <div>Are you sure you want to delete downtime "{{ downtimeDeleteDialog.name }}"?</div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" :disable="downtimeDeleteDialog.submitting" @click="closeDowntimeDeleteDialog" />
+          <q-btn
+            color="negative"
+            label="Delete"
+            :loading="downtimeDeleteDialog.submitting"
+            @click="confirmDowntimeDelete"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-layout>
 </template>
 
@@ -413,7 +583,17 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Notify } from "quasar";
-import { fetchCheckDetails, fetchCheckSummaries, fetchHosts, logout, triggerCheckNow } from "../services/api";
+import {
+  createDowntimeAbsolute,
+  createDowntimeRelative,
+  deleteDowntime,
+  fetchCheckDetails,
+  fetchCheckSummaries,
+  fetchDowntimes,
+  fetchHosts,
+  logout,
+  triggerCheckNow,
+} from "../services/api";
 import { TABLE_BATCH_SIZE } from "../config";
 import { activeRequests } from "../services/requestTracker";
 
@@ -476,6 +656,32 @@ const statusOptions = [
   { label: "Unknown", value: "unknown" },
 ];
 const statusFilters = ref([]);
+const downtimes = ref([]);
+const loadingDowntimes = ref(false);
+const downtimePagination = reactive({
+  page: 1,
+  rowsPerPage: TABLE_BATCH_SIZE,
+  rowsNumber: 0,
+  count: 0,
+});
+const downtimeNameFilter = ref("");
+let downtimeNameTimer;
+const downtimeDialog = reactive({
+  open: false,
+  mode: "relative",
+  name: "",
+  hostName: "",
+  checkName: "",
+  duration: null,
+  from: "",
+  to: "",
+  submitting: false,
+});
+const downtimeDeleteDialog = reactive({
+  open: false,
+  name: "",
+  submitting: false,
+});
 
 const hostCheckColumns = [
   {
@@ -572,6 +778,52 @@ const checkMaxPage = computed(() => {
 });
 
 const checkGroups = computed(() => checkSummaries.value);
+const downtimeColumns = [
+  {
+    name: "name",
+    label: "Name",
+    field: (row) => row.name,
+    align: "left",
+  },
+  {
+    name: "host",
+    label: "Host",
+    field: (row) => row.host_name || "All",
+    align: "left",
+  },
+  {
+    name: "check",
+    label: "Check",
+    field: (row) => row.check_name || "All",
+    align: "left",
+  },
+  {
+    name: "from",
+    label: "From",
+    field: (row) => formattedDate(row.from * 1000, true),
+    align: "left",
+  },
+  {
+    name: "to",
+    label: "To",
+    field: (row) => formattedDate(row.to * 1000, true),
+    align: "left",
+  },
+  {
+    name: "actions",
+    label: "",
+    align: "right",
+  },
+];
+
+const downtimeMaxPage = computed(() => {
+  const total = downtimePagination.rowsNumber || 0;
+  const perPage = downtimePagination.rowsPerPage || TABLE_BATCH_SIZE;
+  if (total === 0) {
+    return 1;
+  }
+  return Math.ceil(total / perPage);
+});
 
 function activeStatuses() {
   return (statusFilters.value || [])
@@ -582,6 +834,7 @@ function activeStatuses() {
 onMounted(() => {
   loadHosts();
   loadCheckSummaries();
+  loadDowntimes();
 });
 
 async function loadHosts(nextPage, options = {}) {
@@ -854,6 +1107,186 @@ function checkDetailsMaxPage(checkName) {
 
 function changeCheckDetailsPage(checkName, nextPage) {
   loadCheckDetails(checkName, nextPage);
+}
+
+function sanitizeOptional(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function toUnixSeconds(value) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return Math.floor(date.getTime() / 1000);
+}
+
+async function loadDowntimes(nextPage) {
+  if (typeof nextPage === "number") {
+    downtimePagination.page = nextPage;
+  }
+  const perPage = downtimePagination.rowsPerPage || TABLE_BATCH_SIZE;
+  const page = Math.max(1, downtimePagination.page);
+  const offset = (page - 1) * perPage;
+  loadingDowntimes.value = true;
+  try {
+    const pattern = buildSearchPattern(downtimeNameFilter.value);
+    const data = await fetchDowntimes({
+      count: perPage,
+      offset,
+      name: pattern,
+    });
+    downtimes.value = data.items || [];
+    downtimePagination.count = data.count ?? downtimes.value.length;
+    downtimePagination.rowsNumber = data.total ?? downtimePagination.count;
+    const maxPage = downtimeMaxPage.value;
+    if (page > maxPage && maxPage > 0) {
+      downtimePagination.page = maxPage;
+      if (maxPage !== page) {
+        await loadDowntimes(maxPage);
+      }
+    }
+  } catch (err) {
+    console.error("load downtimes", err);
+  } finally {
+    loadingDowntimes.value = false;
+  }
+}
+
+function refreshDowntimes() {
+  loadDowntimes();
+}
+
+function changeDowntimePage(nextPage) {
+  loadDowntimes(nextPage);
+}
+
+function handleDowntimeFilterInput() {
+  if (downtimeNameTimer) {
+    clearTimeout(downtimeNameTimer);
+  }
+  downtimeNameTimer = setTimeout(() => {
+    downtimePagination.page = 1;
+    loadDowntimes();
+  }, 200);
+}
+
+function openDowntimeDialog() {
+  resetDowntimeDialog();
+  downtimeDialog.open = true;
+}
+
+function closeDowntimeDialog() {
+  downtimeDialog.open = false;
+  resetDowntimeDialog();
+}
+
+function resetDowntimeDialog() {
+  downtimeDialog.mode = "relative";
+  downtimeDialog.name = "";
+  downtimeDialog.hostName = "";
+  downtimeDialog.checkName = "";
+  downtimeDialog.duration = null;
+  downtimeDialog.from = "";
+  downtimeDialog.to = "";
+}
+
+async function submitDowntime() {
+  const name = sanitizeOptional(downtimeDialog.name);
+  if (!name) {
+    Notify.create({ type: "negative", message: "Name is required" });
+    return;
+  }
+  const hostName = sanitizeOptional(downtimeDialog.hostName);
+  const checkName = sanitizeOptional(downtimeDialog.checkName);
+  downtimeDialog.submitting = true;
+  try {
+    if (downtimeDialog.mode === "relative") {
+      const duration = Number(downtimeDialog.duration);
+      if (!Number.isFinite(duration) || duration <= 0) {
+        throw new Error("Duration must be greater than zero");
+      }
+      await createDowntimeRelative({
+        name,
+        hostName,
+        checkName,
+        duration: Math.floor(duration),
+      });
+    } else {
+      const fromTs = toUnixSeconds(downtimeDialog.from);
+      const toTs = toUnixSeconds(downtimeDialog.to);
+      if (!fromTs || !toTs) {
+        throw new Error("Both start and end time are required");
+      }
+      if (toTs <= fromTs) {
+        throw new Error("End time must be after start time");
+      }
+      await createDowntimeAbsolute({
+        name,
+        hostName,
+        checkName,
+        from: fromTs,
+        till: toTs,
+      });
+    }
+    Notify.create({ type: "positive", message: "Downtime created" });
+    closeDowntimeDialog();
+    await loadDowntimes(downtimePagination.page);
+  } catch (err) {
+    console.error("create downtime failed", err);
+    Notify.create({
+      type: "negative",
+      message: err?.response?.data?.error || err?.message || "Failed to create downtime",
+    });
+  } finally {
+    downtimeDialog.submitting = false;
+  }
+}
+
+function promptDowntimeDelete(row) {
+  if (!row?.name) {
+    return;
+  }
+  downtimeDeleteDialog.name = row.name;
+  downtimeDeleteDialog.open = true;
+}
+
+function closeDowntimeDeleteDialog() {
+  if (downtimeDeleteDialog.submitting) {
+    return;
+  }
+  downtimeDeleteDialog.open = false;
+  downtimeDeleteDialog.name = "";
+}
+
+async function confirmDowntimeDelete() {
+  const name = downtimeDeleteDialog.name;
+  if (!name) {
+    return;
+  }
+  downtimeDeleteDialog.submitting = true;
+  try {
+    await deleteDowntime(name);
+    Notify.create({ type: "positive", message: `Downtime "${name}" deleted` });
+    downtimeDeleteDialog.open = false;
+    downtimeDeleteDialog.name = "";
+    await loadDowntimes(downtimePagination.page);
+  } catch (err) {
+    console.error("delete downtime failed", err);
+    Notify.create({
+      type: "negative",
+      message: err?.response?.data?.error || "Failed to delete downtime",
+    });
+  } finally {
+    downtimeDeleteDialog.submitting = false;
+  }
 }
 
 watch(
