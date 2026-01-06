@@ -545,8 +545,10 @@
               spread
               dense
               unelevated
-              color="primary"
-              text-color="white"
+              color="grey-4"
+              text-color="primary"
+              toggle-color="primary"
+              toggle-text-color="white"
               :options="[
                 { label: 'Relative', value: 'relative' },
                 { label: 'Absolute', value: 'absolute' },
@@ -563,25 +565,21 @@
               min="1"
             />
           </div>
-          <div v-else class="row q-col-gutter-md">
-            <div class="col-12 col-md-6">
-              <q-input
-                v-model="downtimeDialog.from"
-                type="datetime-local"
-                label="From"
-                dense
-                outlined
-              />
-            </div>
-            <div class="col-12 col-md-6">
-              <q-input
-                v-model="downtimeDialog.to"
-                type="datetime-local"
-                label="To"
-                dense
-                outlined
-              />
-            </div>
+          <div v-else class="column q-gutter-md" style="max-width: 360px; margin: 0 auto;">
+            <q-input
+              v-model="downtimeDialog.from"
+              type="datetime-local"
+              label="From"
+              dense
+              outlined
+            />
+            <q-input
+              v-model="downtimeDialog.to"
+              type="datetime-local"
+              label="To"
+              dense
+              outlined
+            />
           </div>
         </q-card-section>
         <q-card-actions align="right">
