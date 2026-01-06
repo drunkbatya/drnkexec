@@ -12,19 +12,10 @@ import (
 	"go.uber.org/zap"
 )
 
-type Status string
-
-const (
-	StatusOK       Status = "ok"
-	StatusWarning  Status = "warning"
-	StatusCritical Status = "critical"
-	StatusUnknown  Status = "unknown"
-)
-
 type CheckInfo struct {
 	Hostname      string
 	CheckName     string
-	Status        Status
+	Status        model.Status
 	Output        string
 	UpdatedAt     time.Time
 	FailCount     int
@@ -79,7 +70,7 @@ func NewManager(logger *zap.SugaredLogger, cfg *model.Config) *Manager {
 		hostChecks[host][assignment.Check.Name] = &CheckInfo{
 			Hostname:      host,
 			CheckName:     assignment.Check.Name,
-			Status:        StatusUnknown,
+			Status:        model.StatusUnknown,
 			FailThreshold: assignment.Check.MinFailBeforeAlert,
 		}
 	}
@@ -113,10 +104,10 @@ func (m *Manager) Update(assignment model.CheckAssignment, status nrpeclient.Sta
 }
 
 func (m *Manager) HostSummaries() []HostSummary {
-	return m.HostSummariesFiltered("")
+	return m.HostSummariesFiltered("", nil)
 }
 
-func (m *Manager) HostSummariesFiltered(pattern string) []HostSummary {
+func (m *Manager) HostSummariesFiltered(pattern string, statuses []model.Status) []HostSummary {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make([]HostSummary, 0, len(m.hostOrder))
@@ -129,11 +120,16 @@ func (m *Manager) HostSummariesFiltered(pattern string) []HostSummary {
 			matcher = func(s string) bool { return strings.HasPrefix(s, pattern) }
 		}
 	}
+	statusFilter := buildStatusFilter(statuses)
 	for _, hostname := range m.hostOrder {
 		if matcher != nil && !matcher(hostname) {
 			continue
 		}
-		result = append(result, m.buildHostSummaryLocked(hostname))
+		checks := m.hostChecks[hostname]
+		if len(statusFilter) > 0 && !hostMatchesStatuses(checks, statusFilter) {
+			continue
+		}
+		result = append(result, m.buildHostSummaryFromChecks(hostname, checks))
 	}
 	return result
 }
@@ -168,7 +164,7 @@ func (m *Manager) HostChecks(hostname string) ([]CheckInfo, bool) {
 	return list, true
 }
 
-func (m *Manager) Checks(hostFilter string) ([]CheckInfo, bool) {
+func (m *Manager) Checks(hostFilter string, statuses []model.Status) ([]CheckInfo, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var hosts []string
@@ -180,10 +176,16 @@ func (m *Manager) Checks(hostFilter string) ([]CheckInfo, bool) {
 	} else {
 		hosts = append(hosts, m.hostOrder...)
 	}
+	statusFilter := buildStatusFilter(statuses)
 	var list []CheckInfo
 	for _, hostname := range hosts {
 		checks := m.hostChecks[hostname]
 		for _, info := range checks {
+			if len(statusFilter) > 0 {
+				if _, ok := statusFilter[info.Status]; !ok {
+					continue
+				}
+			}
 			list = append(list, *info)
 		}
 	}
@@ -211,10 +213,10 @@ func (m *Manager) Check(hostname, checkname string) (CheckInfo, bool) {
 }
 
 func (m *Manager) CheckSummaries() []CheckSummary {
-	return m.CheckSummariesFiltered("")
+	return m.CheckSummariesFiltered("", nil)
 }
 
-func (m *Manager) CheckSummariesFiltered(pattern string) []CheckSummary {
+func (m *Manager) CheckSummariesFiltered(pattern string, statuses []model.Status) []CheckSummary {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var matcher func(string) bool
@@ -226,7 +228,9 @@ func (m *Manager) CheckSummariesFiltered(pattern string) []CheckSummary {
 			matcher = func(s string) bool { return strings.HasPrefix(s, pattern) }
 		}
 	}
+	statusFilter := buildStatusFilter(statuses)
 	summaryMap := make(map[string]*CheckSummary)
+	matchStatus := make(map[string]bool)
 	names := make([]string, 0)
 	for _, hostname := range m.hostOrder {
 		checks := m.hostChecks[hostname]
@@ -242,28 +246,31 @@ func (m *Manager) CheckSummariesFiltered(pattern string) []CheckSummary {
 			}
 			summary.HostCount++
 			switch info.Status {
-			case StatusOK:
+			case model.StatusOK:
 				summary.OK++
-			case StatusWarning:
+			case model.StatusWarning:
 				summary.Warning++
-			case StatusCritical:
+			case model.StatusCritical:
 				summary.Critical++
 			default:
 				summary.Unknown++
+			}
+			if len(statusFilter) == 0 {
+				matchStatus[checkName] = true
+			} else if _, ok := statusFilter[info.Status]; ok {
+				matchStatus[checkName] = true
 			}
 		}
 	}
 	sort.Strings(names)
 	result := make([]CheckSummary, 0, len(names))
 	for _, name := range names {
+		if len(statusFilter) > 0 && !matchStatus[name] {
+			continue
+		}
 		result = append(result, *summaryMap[name])
 	}
 	return result
-}
-
-func (m *Manager) buildHostSummaryLocked(hostname string) HostSummary {
-	checks := m.hostChecks[hostname]
-	return m.buildHostSummaryFromChecks(hostname, checks)
 }
 
 func (m *Manager) buildHostSummaryFromChecks(hostname string, checks map[string]*CheckInfo) HostSummary {
@@ -271,11 +278,11 @@ func (m *Manager) buildHostSummaryFromChecks(hostname string, checks map[string]
 	summary.CheckCount = len(checks)
 	for _, info := range checks {
 		switch info.Status {
-		case StatusOK:
+		case model.StatusOK:
 			summary.OK++
-		case StatusWarning:
+		case model.StatusWarning:
 			summary.Warning++
-		case StatusCritical:
+		case model.StatusCritical:
 			summary.Critical++
 		default:
 			summary.Unknown++
@@ -284,15 +291,38 @@ func (m *Manager) buildHostSummaryFromChecks(hostname string, checks map[string]
 	return summary
 }
 
-func mapStatus(status nrpeclient.Status) Status {
+func mapStatus(status nrpeclient.Status) model.Status {
 	switch status {
 	case nrpeclient.StatusOK:
-		return StatusOK
+		return model.StatusOK
 	case nrpeclient.StatusWarning:
-		return StatusWarning
+		return model.StatusWarning
 	case nrpeclient.StatusCritical:
-		return StatusCritical
+		return model.StatusCritical
 	default:
-		return StatusUnknown
+		return model.StatusUnknown
 	}
+}
+
+func buildStatusFilter(statuses []model.Status) map[model.Status]struct{} {
+	if len(statuses) == 0 {
+		return nil
+	}
+	filter := make(map[model.Status]struct{}, len(statuses))
+	for _, status := range statuses {
+		filter[status] = struct{}{}
+	}
+	return filter
+}
+
+func hostMatchesStatuses(checks map[string]*CheckInfo, filter map[model.Status]struct{}) bool {
+	if len(filter) == 0 {
+		return true
+	}
+	for _, info := range checks {
+		if _, ok := filter[info.Status]; ok {
+			return true
+		}
+	}
+	return false
 }

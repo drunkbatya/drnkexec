@@ -54,20 +54,43 @@
               </q-card-section>
               <q-separator />
               <div class="q-pa-md">
-                <q-input
-                  v-model="hostSearch"
-                  label="Filter by host name"
-                  dense
-                  outlined
-                  clearable
-                  debounce="0"
-                  @update:model-value="handleHostSearchInput"
-                  class="q-mb-md"
-                >
-                  <template #prepend>
-                    <q-icon name="search" />
-                  </template>
-                </q-input>
+                <div class="row q-col-gutter-md q-mb-md items-start">
+                  <div class="col-12 col-md">
+                    <q-input
+                      v-model="hostSearch"
+                      label="Filter by host name"
+                      dense
+                      outlined
+                      clearable
+                      debounce="0"
+                      @update:model-value="handleHostSearchInput"
+                    >
+                      <template #prepend>
+                        <q-icon name="search" />
+                      </template>
+                    </q-input>
+                  </div>
+                  <div class="col-12 col-md-auto">
+                    <q-select
+                      v-model="statusFilters"
+                      :options="statusOptions"
+                      label="Filter by status"
+                      dense
+                      outlined
+                      multiple
+                      clearable
+                      emit-value
+                      map-options
+                      use-chips
+                      dropdown-icon="arrow_drop_down"
+                      style="min-width: 220px;"
+                    >
+                      <template #prepend>
+                        <q-icon name="filter_list" />
+                      </template>
+                    </q-select>
+                  </div>
+                </div>
                 <div v-if="loadingHosts" class="text-center q-my-lg">
                   <q-spinner-dots color="primary" size="2rem" />
                 </div>
@@ -213,20 +236,43 @@
               </q-card-section>
               <q-separator />
               <div class="q-pa-md">
-                <q-input
-                  v-model="checkSearch"
-                  label="Filter by check name"
-                  dense
-                  outlined
-                  clearable
-                  debounce="0"
-                  @update:model-value="handleCheckSearchInput"
-                  class="q-mb-md"
-                >
-                  <template #prepend>
-                    <q-icon name="search" />
-                  </template>
-                </q-input>
+                <div class="row q-col-gutter-md q-mb-md items-start">
+                  <div class="col-12 col-md">
+                    <q-input
+                      v-model="checkSearch"
+                      label="Filter by check name"
+                      dense
+                      outlined
+                      clearable
+                      debounce="0"
+                      @update:model-value="handleCheckSearchInput"
+                    >
+                      <template #prepend>
+                        <q-icon name="search" />
+                      </template>
+                    </q-input>
+                  </div>
+                  <div class="col-12 col-md-auto">
+                    <q-select
+                      v-model="statusFilters"
+                      :options="statusOptions"
+                      label="Filter by status"
+                      dense
+                      outlined
+                      multiple
+                      clearable
+                      emit-value
+                      map-options
+                      use-chips
+                      dropdown-icon="arrow_drop_down"
+                      style="min-width: 220px;"
+                    >
+                      <template #prepend>
+                        <q-icon name="filter_list" />
+                      </template>
+                    </q-select>
+                  </div>
+                </div>
                 <div v-if="loadingChecks" class="text-center q-my-lg">
                   <q-spinner-dots color="primary" size="2rem" />
                 </div>
@@ -423,6 +469,13 @@ const defaultCheckDetailsState = {
 };
 const hostDateModes = reactive({});
 const checkDateModes = reactive({});
+const statusOptions = [
+  { label: "OK", value: "ok" },
+  { label: "Warning", value: "warning" },
+  { label: "Critical", value: "critical" },
+  { label: "Unknown", value: "unknown" },
+];
+const statusFilters = ref([]);
 
 const hostCheckColumns = [
   {
@@ -520,6 +573,12 @@ const checkMaxPage = computed(() => {
 
 const checkGroups = computed(() => checkSummaries.value);
 
+function activeStatuses() {
+  return (statusFilters.value || [])
+    .map((status) => (typeof status === "string" ? status.trim() : ""))
+    .filter((status) => Boolean(status));
+}
+
 onMounted(() => {
   loadHosts();
   loadCheckSummaries();
@@ -536,7 +595,12 @@ async function loadHosts(nextPage, options = {}) {
   loadingHosts.value = true;
   try {
     const pattern = buildSearchPattern(hostSearch.value);
-    const data = await fetchHosts({ count: perPage, offset, hostNameSearch: pattern });
+    const data = await fetchHosts({
+      count: perPage,
+      offset,
+      hostNameSearch: pattern,
+      statuses: activeStatuses(),
+    });
     hosts.value = data.hosts || [];
     hostPagination.count = data.count ?? hosts.value.length;
     hostPagination.rowsNumber = data.total ?? hostPagination.count;
@@ -604,6 +668,7 @@ async function loadCheckSummaries(nextPage, options = {}) {
       count: perPage,
       offset,
       checkNameSearch: pattern,
+      statuses: activeStatuses(),
     });
     checkSummaries.value = data.checks || [];
     checkPagination.count = data.count ?? checkSummaries.value.length;
@@ -680,6 +745,7 @@ async function loadHostChecks(hostname, nextPage) {
       hostName: hostname,
       count: perPage,
       offset,
+      statuses: activeStatuses(),
     });
     state.items = data.items || [];
     state.count = data.count ?? state.items.length;
@@ -757,6 +823,7 @@ async function loadCheckDetails(checkName, nextPage) {
       checkName,
       count: perPage,
       offset,
+      statuses: activeStatuses(),
     });
     state.items = data.items || [];
     state.count = data.count ?? state.items.length;
@@ -835,6 +902,17 @@ watch(
     });
   },
   { immediate: true }
+);
+
+watch(
+  statusFilters,
+  () => {
+    hostPagination.page = 1;
+    checkPagination.page = 1;
+    loadHosts(undefined, { refreshOpen: true });
+    loadCheckSummaries(undefined, { refreshOpen: true });
+  },
+  { deep: true }
 );
 
 function statusColor(status) {
@@ -994,9 +1072,9 @@ async function runCheckNow(row) {
     });
     await Promise.all([loadHosts(hostPagination.page), loadCheckSummaries(checkPagination.page)]);
     const hostVisible = hosts.value.some((host) => host.Hostname === row.Hostname);
-  if (hostVisible) {
-    await loadHostChecks(row.Hostname, getHostChecksState(row.Hostname).page);
-  }
+    if (hostVisible) {
+      await loadHostChecks(row.Hostname, getHostChecksState(row.Hostname).page);
+    }
     const checkVisible = checkSummaries.value.some((check) => check.CheckName === row.CheckName);
     if (checkVisible) {
       await loadCheckDetails(row.CheckName, getCheckDetailsState(row.CheckName).page);

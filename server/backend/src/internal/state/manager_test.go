@@ -20,7 +20,7 @@ func TestManagerInitializationSeedsUnknownChecks(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected check info")
 	}
-	if info.Status != StatusUnknown {
+	if info.Status != model.StatusUnknown {
 		t.Fatalf("expected status unknown, got %s", info.Status)
 	}
 }
@@ -36,7 +36,7 @@ func TestManagerUpdateAndQueries(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected check info")
 	}
-	if info.Status != StatusWarning {
+	if info.Status != model.StatusWarning {
 		t.Fatalf("expected warning, got %s", info.Status)
 	}
 	if info.Output != "some output" {
@@ -49,12 +49,12 @@ func TestManagerUpdateAndQueries(t *testing.T) {
 		t.Fatalf("expected fail threshold %d, got %d", assignment.Check.MinFailBeforeAlert, info.FailThreshold)
 	}
 
-	checks, ok := m.Checks("")
+	checks, ok := m.Checks("", nil)
 	if !ok || len(checks) != 2 {
 		t.Fatalf("expected checks slice, got %v", checks)
 	}
 
-	if _, ok := m.Checks("missing"); ok {
+	if _, ok := m.Checks("missing", nil); ok {
 		t.Fatalf("expected false for unknown host")
 	}
 
@@ -94,6 +94,70 @@ func TestCheckSummaries(t *testing.T) {
 	}
 	if alphaSummary.HostCount != 1 || alphaSummary.Critical != 1 {
 		t.Fatalf("unexpected alpha summary %+v", alphaSummary)
+	}
+}
+
+func TestCheckSummariesStatusFilter(t *testing.T) {
+	cfg := testConfig()
+	logger := zaptest.NewLogger(t).Sugar()
+	m := NewManager(logger, cfg)
+	assignments := cfg.LookupMaps.CheckAssignments
+	m.Update(assignments[0], nrpeclient.StatusCritical, "bad", 1)
+	m.Update(assignments[1], nrpeclient.StatusOK, "ok", 0)
+
+	critical := m.CheckSummariesFiltered("", []model.Status{model.StatusCritical})
+	if len(critical) != 1 || critical[0].CheckName != "check-alpha" {
+		t.Fatalf("expected only check-alpha, got %+v", critical)
+	}
+
+	warnings := m.CheckSummariesFiltered("", []model.Status{model.StatusWarning})
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warning summaries, got %+v", warnings)
+	}
+}
+
+func TestHostSummariesStatusFilter(t *testing.T) {
+	cfg := testConfig()
+	logger := zaptest.NewLogger(t).Sugar()
+	m := NewManager(logger, cfg)
+	assignments := cfg.LookupMaps.CheckAssignments
+	m.Update(assignments[0], nrpeclient.StatusCritical, "bad", 1)
+	m.Update(assignments[1], nrpeclient.StatusOK, "ok", 0)
+
+	criticalOnly := m.HostSummariesFiltered("", []model.Status{model.StatusCritical})
+	if len(criticalOnly) != 1 || criticalOnly[0].Hostname != "alpha" {
+		t.Fatalf("expected only alpha host, got %+v", criticalOnly)
+	}
+
+	all := m.HostSummariesFiltered("", []model.Status{model.StatusCritical, model.StatusOK})
+	if len(all) != 2 {
+		t.Fatalf("expected both hosts, got %d", len(all))
+	}
+}
+
+func TestChecksStatusFilter(t *testing.T) {
+	cfg := testConfig()
+	logger := zaptest.NewLogger(t).Sugar()
+	m := NewManager(logger, cfg)
+	assignments := cfg.LookupMaps.CheckAssignments
+	m.Update(assignments[0], nrpeclient.StatusCritical, "bad", 1)
+	m.Update(assignments[1], nrpeclient.StatusOK, "ok", 0)
+
+	checks, ok := m.Checks("", []model.Status{model.StatusCritical})
+	if !ok || len(checks) != 1 || checks[0].Hostname != "alpha" {
+		t.Fatalf("expected only alpha critical check, got %+v", checks)
+	}
+
+	checks, ok = m.Checks("beta", []model.Status{model.StatusCritical})
+	if !ok {
+		t.Fatalf("expected beta host lookup")
+	}
+	if len(checks) != 0 {
+		t.Fatalf("expected no critical checks for beta, got %+v", checks)
+	}
+
+	if _, ok := m.Checks("missing", []model.Status{model.StatusCritical}); ok {
+		t.Fatalf("expected missing host to return false")
 	}
 }
 

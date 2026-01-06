@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/downtime"
@@ -273,6 +275,7 @@ func (s *Server) handleAppVersion(w http.ResponseWriter, r *http.Request) {
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
 // @Param host_name_search query string false "Filter hosts starting with this prefix"
+// @Param statuses query string false "JSON array of statuses to include"
 // @Success 200 {object} responseHosts
 // @Failure 403 {object} errorResponse
 // @Router /api/v1/admin/hosts [get]
@@ -291,7 +294,12 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 	prefix := query.Get("host_name_search")
-	all := s.state.HostSummariesFiltered(prefix)
+	statusFilters, err := parseStatusesParam(query.Get("statuses"))
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	all := s.state.HostSummariesFiltered(prefix, statusFilters)
 	total := len(all)
 	if offset > total {
 		offset = total
@@ -313,6 +321,7 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
 // @Param check_name_search query string false "Regex or prefix filter by check name"
+// @Param statuses query string false "JSON array of statuses to include"
 // @Success 200 {object} responseCheckSummaries
 // @Failure 403 {object} errorResponse
 // @Router /api/v1/admin/checks [get]
@@ -331,7 +340,12 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 	checkNameFilter := query.Get("check_name_search")
-	summaries := s.state.CheckSummariesFiltered(checkNameFilter)
+	statusFilters, err := parseStatusesParam(query.Get("statuses"))
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	summaries := s.state.CheckSummariesFiltered(checkNameFilter, statusFilters)
 	total := len(summaries)
 	if offset > total {
 		offset = total
@@ -351,6 +365,7 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 // @Security SessionAuth
 // @Param host_name query string false "Filter by host"
 // @Param check_name query string false "Filter by check name"
+// @Param statuses query string false "JSON array of statuses to include"
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
 // @Success 200 {object} responseCheckDetails
@@ -373,7 +388,12 @@ func (s *Server) handleCheckDetails(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	checks, ok := s.state.Checks(hostname)
+	statusFilters, err := parseStatusesParam(query.Get("statuses"))
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	checks, ok := s.state.Checks(hostname, statusFilters)
 	if !ok && hostname != "" {
 		s.writeError(w, http.StatusNotFound, "host not found")
 		return
@@ -756,4 +776,36 @@ func parseInt(value string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func parseStatusesParam(raw string) ([]model.Status, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, fmt.Errorf("invalid statuses filter")
+	}
+	return normalizeStatuses(values)
+}
+
+func normalizeStatuses(values []string) ([]model.Status, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	seen := make(map[model.Status]struct{}, len(values))
+	statuses := make([]model.Status, 0, len(values))
+	for _, value := range values {
+		status, ok := model.ParseStatus(value)
+		if !ok {
+			return nil, fmt.Errorf("unknown status %q", value)
+		}
+		if _, exists := seen[status]; exists {
+			continue
+		}
+		seen[status] = struct{}{}
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
 }

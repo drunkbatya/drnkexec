@@ -79,6 +79,19 @@ protectedApi.interceptors.response.use(
 userApi.interceptors.request.use(onRequest, onRequestError);
 userApi.interceptors.response.use(onResponse, (error) => onResponseError(error, false));
 
+function encodeStatuses(statuses) {
+  if (!Array.isArray(statuses)) {
+    return undefined;
+  }
+  const values = statuses
+    .map((status) => (typeof status === "string" ? status.trim() : ""))
+    .filter((status) => Boolean(status));
+  if (values.length === 0) {
+    return undefined;
+  }
+  return JSON.stringify(values);
+}
+
 export async function login(login, password) {
   const res = await userApi.post("/login", { login, password }, { skipNotify: true });
   return res.data;
@@ -88,7 +101,7 @@ export async function logout() {
   await userApi.post("/logout");
 }
 
-export async function fetchHosts({ count, offset, hostNameSearch } = {}) {
+export async function fetchHosts({ count, offset, hostNameSearch, statuses } = {}) {
   const params = {};
   if (typeof count === "number") {
     params.count = count;
@@ -99,11 +112,15 @@ export async function fetchHosts({ count, offset, hostNameSearch } = {}) {
   if (hostNameSearch) {
     params.host_name_search = hostNameSearch;
   }
+  const encodedStatuses = encodeStatuses(statuses);
+  if (encodedStatuses) {
+    params.statuses = encodedStatuses;
+  }
   const res = await protectedApi.get("/hosts", { params });
   return res.data;
 }
 
-export async function fetchCheckSummaries({ count, offset, checkNameSearch } = {}) {
+export async function fetchCheckSummaries({ count, offset, checkNameSearch, statuses } = {}) {
   const params = {};
   if (typeof count === "number") {
     params.count = count;
@@ -114,11 +131,15 @@ export async function fetchCheckSummaries({ count, offset, checkNameSearch } = {
   if (checkNameSearch) {
     params.check_name_search = checkNameSearch;
   }
+  const encodedStatuses = encodeStatuses(statuses);
+  if (encodedStatuses) {
+    params.statuses = encodedStatuses;
+  }
   const res = await protectedApi.get("/checks", { params });
   return res.data;
 }
 
-export async function fetchCheckDetails({ count, offset, hostName, checkName } = {}) {
+export async function fetchCheckDetails({ count, offset, hostName, checkName, statuses } = {}) {
   const params = {};
   if (typeof count === "number") {
     params.count = count;
@@ -131,6 +152,10 @@ export async function fetchCheckDetails({ count, offset, hostName, checkName } =
   }
   if (checkName) {
     params.check_name = checkName;
+  }
+  const encodedStatuses = encodeStatuses(statuses);
+  if (encodedStatuses) {
+    params.statuses = encodedStatuses;
   }
   const res = await protectedApi.get("/checks/detail", { params });
   return res.data;
