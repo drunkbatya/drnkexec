@@ -121,6 +121,16 @@
                           Unknown: {{ host.Unknown || 0 }}
                         </div>
                       </q-item-section>
+                      <q-item-section side>
+                        <q-btn
+                          size="sm"
+                          flat
+                          color="primary"
+                          icon="add"
+                          label="Create Downtime"
+                          @click.stop="openDowntimeDialogForHost(host.Hostname)"
+                        />
+                      </q-item-section>
                     </template>
 
                     <div v-if="getHostChecksState(host.Hostname).loading" class="text-center q-my-lg">
@@ -172,7 +182,7 @@
                           </q-td>
                         </template>
                         <template #body-cell-actions="props">
-                          <q-td :props="props">
+                          <q-td :props="props" class="q-gutter-sm">
                             <q-btn
                               size="sm"
                               flat
@@ -181,6 +191,14 @@
                               label="Check Now"
                               :loading="isCheckRunning(props.row)"
                               @click="runCheckNow(props.row)"
+                            />
+                            <q-btn
+                              size="sm"
+                              flat
+                              color="primary"
+                              icon="add"
+                              label="Create Downtime"
+                              @click="openDowntimeDialogForCheckInstance(host.Hostname, props.row.CheckName)"
                             />
                           </q-td>
                         </template>
@@ -303,6 +321,16 @@
                           Unknown: {{ group.Unknown || 0 }}
                         </div>
                       </q-item-section>
+                      <q-item-section side>
+                        <q-btn
+                          size="sm"
+                          flat
+                          color="primary"
+                          icon="add"
+                          label="Create Downtime"
+                          @click.stop="openDowntimeDialogForCheck({ checkName: group.CheckName })"
+                        />
+                      </q-item-section>
                     </template>
 
                     <div v-if="getCheckDetailsState(group.CheckName).loading" class="text-center q-my-lg">
@@ -354,7 +382,7 @@
                           </q-td>
                         </template>
                         <template #body-cell-actions="props">
-                          <q-td :props="props">
+                          <q-td :props="props" class="q-gutter-sm">
                             <q-btn
                               size="sm"
                               flat
@@ -363,6 +391,14 @@
                               label="Check Now"
                               :loading="isCheckRunning(props.row)"
                               @click="runCheckNow(props.row)"
+                            />
+                            <q-btn
+                              size="sm"
+                              flat
+                              color="primary"
+                              icon="add"
+                              label="Create Downtime"
+                              @click="openDowntimeDialogForCheckInstance(props.row.Hostname, props.row.CheckName)"
                             />
                           </q-td>
                         </template>
@@ -1180,6 +1216,25 @@ function handleDowntimeFilterInput() {
 
 function openDowntimeDialog() {
   resetDowntimeDialog();
+  downtimeDialog.open = true;
+}
+
+function openDowntimeDialogForHost(hostName) {
+  resetDowntimeDialog();
+  downtimeDialog.hostName = hostName;
+  downtimeDialog.open = true;
+}
+
+function openDowntimeDialogForCheck({ checkName }) {
+  resetDowntimeDialog();
+  downtimeDialog.checkName = checkName;
+  downtimeDialog.open = true;
+}
+
+function openDowntimeDialogForCheckInstance(hostName, checkName) {
+  resetDowntimeDialog();
+  downtimeDialog.hostName = hostName;
+  downtimeDialog.checkName = checkName;
   downtimeDialog.open = true;
 }
 
