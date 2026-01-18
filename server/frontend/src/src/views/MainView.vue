@@ -57,19 +57,26 @@
               <div class="q-pa-md">
                 <div class="row q-col-gutter-md q-mb-md items-start">
                   <div class="col-12 col-md">
-                    <q-input
-                      v-model="hostSearch"
-                      label="Filter by host name"
-                      dense
-                      outlined
-                      clearable
-                      debounce="0"
-                      @update:model-value="handleHostSearchInput"
-                    >
-                      <template #prepend>
-                        <q-icon name="search" />
-                      </template>
-                    </q-input>
+                    <div class="row items-center no-wrap">
+                      <div class="col">
+                        <q-input
+                          v-model="hostSearch"
+                          label="Filter by host name"
+                          dense
+                          outlined
+                          clearable
+                          debounce="0"
+                          @update:model-value="handleHostSearchInput"
+                        >
+                          <template #prepend>
+                            <q-icon name="search" />
+                          </template>
+                        </q-input>
+                      </div>
+                      <div class="q-ml-sm">
+                        <q-checkbox v-model="hostSearchExact" label="Exact match" dense />
+                      </div>
+                    </div>
                   </div>
                   <div class="col-12 col-md-auto">
                     <q-select
@@ -257,19 +264,26 @@
               <div class="q-pa-md">
                 <div class="row q-col-gutter-md q-mb-md items-start">
                   <div class="col-12 col-md">
-                    <q-input
-                      v-model="checkSearch"
-                      label="Filter by check name"
-                      dense
-                      outlined
-                      clearable
-                      debounce="0"
-                      @update:model-value="handleCheckSearchInput"
-                    >
-                      <template #prepend>
-                        <q-icon name="search" />
-                      </template>
-                    </q-input>
+                    <div class="row items-center no-wrap">
+                      <div class="col">
+                        <q-input
+                          v-model="checkSearch"
+                          label="Filter by check name"
+                          dense
+                          outlined
+                          clearable
+                          debounce="0"
+                          @update:model-value="handleCheckSearchInput"
+                        >
+                          <template #prepend>
+                            <q-icon name="search" />
+                          </template>
+                        </q-input>
+                      </div>
+                      <div class="q-ml-sm">
+                        <q-checkbox v-model="checkSearchExact" label="Exact match" dense />
+                      </div>
+                    </div>
                   </div>
                   <div class="col-12 col-md-auto">
                     <q-select
@@ -466,19 +480,37 @@
               <div class="q-pa-md">
                 <div class="row q-col-gutter-md q-mb-md">
                   <div class="col-12 col-md-6">
-                    <q-input
-                      v-model="downtimeNameFilter"
-                      label="Filter by downtime name"
+                    <div class="row items-center no-wrap">
+                      <div class="col">
+                        <q-input
+                          v-model="downtimeNameFilter"
+                          label="Filter by downtime name"
+                          dense
+                          outlined
+                          clearable
+                          debounce="0"
+                          @update:model-value="handleDowntimeFilterInput"
+                        >
+                          <template #prepend>
+                            <q-icon name="search" />
+                          </template>
+                        </q-input>
+                      </div>
+                      <div class="q-ml-sm">
+                        <q-checkbox v-model="downtimeNameExact" label="Exact match" dense />
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-md-6">
+                    <q-select
+                      v-model="downtimeScope"
+                      :options="downtimeScopeOptions"
+                      label="Scope"
                       dense
                       outlined
-                      clearable
-                      debounce="0"
-                      @update:model-value="handleDowntimeFilterInput"
-                    >
-                      <template #prepend>
-                        <q-icon name="search" />
-                      </template>
-                    </q-input>
+                      emit-value
+                      map-options
+                    />
                   </div>
                 </div>
                 <div v-if="loadingDowntimes" class="text-center q-my-lg">
@@ -657,8 +689,10 @@ const defaultHostChecksState = {
 };
 const hostSearch = ref("");
 let hostSearchTimer;
+const hostSearchExact = ref(false);
 const checkSearch = ref("");
 let checkSearchTimer;
+const checkSearchExact = ref(false);
 
 const checkPagination = reactive({
   page: 1,
@@ -690,6 +724,13 @@ const statusOptions = [
   { label: "Unknown", value: "unknown" },
 ];
 const statusFilters = ref([]);
+const downtimeScopeOptions = [
+  { label: "All scopes", value: "all" },
+  { label: "Host-level", value: "host" },
+  { label: "Check-specific", value: "check" },
+  { label: "Global", value: "global" },
+];
+const downtimeScope = ref("all");
 const downtimes = ref([]);
 const loadingDowntimes = ref(false);
 const downtimePagination = reactive({
@@ -700,6 +741,7 @@ const downtimePagination = reactive({
 });
 const downtimeNameFilter = ref("");
 let downtimeNameTimer;
+const downtimeNameExact = ref(false);
 const downtimeDialog = reactive({
   open: false,
   mode: "relative",
@@ -881,11 +923,13 @@ async function loadHosts(nextPage, options = {}) {
   const offset = (page - 1) * perPage;
   loadingHosts.value = true;
   try {
-    const pattern = buildSearchPattern(hostSearch.value);
+    const exactFilter = hostSearchExact.value ? sanitizeOptional(hostSearch.value) : undefined;
+    const pattern = hostSearchExact.value ? "" : buildSearchPattern(hostSearch.value);
     const data = await fetchHosts({
       count: perPage,
       offset,
-      hostNameSearch: pattern,
+      hostName: exactFilter,
+      hostNameRegex: pattern,
       statuses: activeStatuses(),
     });
     hosts.value = data.hosts || [];
@@ -950,11 +994,13 @@ async function loadCheckSummaries(nextPage, options = {}) {
   const offset = (page - 1) * perPage;
   loadingChecks.value = true;
   try {
-    const pattern = buildSearchPattern(checkSearch.value);
+    const exactFilter = checkSearchExact.value ? sanitizeOptional(checkSearch.value) : undefined;
+    const pattern = checkSearchExact.value ? "" : buildSearchPattern(checkSearch.value);
     const data = await fetchCheckSummaries({
       count: perPage,
       offset,
-      checkNameSearch: pattern,
+      checkName: exactFilter,
+      checkNameRegex: pattern,
       statuses: activeStatuses(),
     });
     checkSummaries.value = data.checks || [];
@@ -1171,11 +1217,14 @@ async function loadDowntimes(nextPage) {
   const offset = (page - 1) * perPage;
   loadingDowntimes.value = true;
   try {
-    const pattern = buildSearchPattern(downtimeNameFilter.value);
+    const exactFilter = downtimeNameExact.value ? sanitizeOptional(downtimeNameFilter.value) : undefined;
+    const pattern = downtimeNameExact.value ? "" : buildSearchPattern(downtimeNameFilter.value);
     const data = await fetchDowntimes({
       count: perPage,
       offset,
-      name: pattern,
+      name: exactFilter,
+      nameRegex: pattern,
+      scope: downtimeScope.value,
     });
     downtimes.value = data.items || [];
     downtimePagination.count = data.count ?? downtimes.value.length;
@@ -1400,6 +1449,26 @@ watch(
   },
   { deep: true }
 );
+
+watch(hostSearchExact, () => {
+  hostPagination.page = 1;
+  loadHosts();
+});
+
+watch(checkSearchExact, () => {
+  checkPagination.page = 1;
+  loadCheckSummaries();
+});
+
+watch(downtimeScope, () => {
+  downtimePagination.page = 1;
+  loadDowntimes();
+});
+
+watch(downtimeNameExact, () => {
+  downtimePagination.page = 1;
+  loadDowntimes();
+});
 
 function statusColor(status) {
   switch (status) {

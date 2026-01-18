@@ -274,7 +274,8 @@ func (s *Server) handleAppVersion(w http.ResponseWriter, r *http.Request) {
 // @Security SessionAuth
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
-// @Param host_name_search query string false "Filter hosts starting with this prefix"
+// @Param host_name query string false "Comma-separated list of host names (exact match)"
+// @Param host_name_regex query string false "Regex or prefix filter by host name"
 // @Param statuses query string false "JSON array of statuses to include"
 // @Success 200 {object} responseHosts
 // @Failure 403 {object} errorResponse
@@ -293,13 +294,27 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	prefix := query.Get("host_name_search")
+	hostExact := parseCommaSeparatedValues(query.Get("host_name"))
+	prefix := query.Get("host_name_regex")
 	statusFilters, err := parseStatusesParam(query.Get("statuses"))
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	all := s.state.HostSummariesFiltered(prefix, statusFilters)
+	if len(hostExact) > 0 {
+		filtered := make([]state.HostSummary, 0, len(hostExact))
+		allowed := make(map[string]struct{}, len(hostExact))
+		for _, host := range hostExact {
+			allowed[host] = struct{}{}
+		}
+		for _, item := range all {
+			if _, ok := allowed[item.Hostname]; ok {
+				filtered = append(filtered, item)
+			}
+		}
+		all = filtered
+	}
 	total := len(all)
 	if offset > total {
 		offset = total
@@ -320,7 +335,8 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 // @Security SessionAuth
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
-// @Param check_name_search query string false "Regex or prefix filter by check name"
+// @Param check_name query string false "Comma-separated list of check names (exact match)"
+// @Param check_name_regex query string false "Regex or prefix filter by check name"
 // @Param statuses query string false "JSON array of statuses to include"
 // @Success 200 {object} responseCheckSummaries
 // @Failure 403 {object} errorResponse
@@ -339,13 +355,27 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	checkNameFilter := query.Get("check_name_search")
+	checkNameExact := parseCommaSeparatedValues(query.Get("check_name"))
+	checkNameFilter := query.Get("check_name_regex")
 	statusFilters, err := parseStatusesParam(query.Get("statuses"))
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	summaries := s.state.CheckSummariesFiltered(checkNameFilter, statusFilters)
+	if len(checkNameExact) > 0 {
+		filtered := make([]state.CheckSummary, 0, len(checkNameExact))
+		allowed := make(map[string]struct{}, len(checkNameExact))
+		for _, check := range checkNameExact {
+			allowed[check] = struct{}{}
+		}
+		for _, summary := range summaries {
+			if _, ok := allowed[summary.CheckName]; ok {
+				filtered = append(filtered, summary)
+			}
+		}
+		summaries = filtered
+	}
 	total := len(summaries)
 	if offset > total {
 		offset = total
@@ -601,9 +631,13 @@ func (s *Server) handleDowntimeAbsolute(w http.ResponseWriter, r *http.Request) 
 // @Tags downtimes
 // @Produce json
 // @Security SessionAuth
-// @Param host_name query string false "Filter by host"
-// @Param check_name query string false "Filter by check"
-// @Param name query string false "Filter by downtime name"
+// @Param host_name query string false "Comma-separated list of hosts (exact match)"
+// @Param host_name_regex query string false "Regex or prefix filter by host"
+// @Param check_name query string false "Comma-separated list of checks (exact match)"
+// @Param check_name_regex query string false "Regex or prefix filter by check"
+// @Param name query string false "Comma-separated list of downtime names (exact match)"
+// @Param name_regex query string false "Regex or prefix filter by downtime name"
+// @Param scope query string false "Filter by scope: all, host, check, global"
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
 // @Success 200 {object} downtimeListResponse
@@ -611,9 +645,13 @@ func (s *Server) handleDowntimeAbsolute(w http.ResponseWriter, r *http.Request) 
 // @Router /api/v1/admin/downtime [get]
 func (s *Server) handleDowntimeList(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	host := query.Get("host_name")
-	check := query.Get("check_name")
-	name := query.Get("name")
+	hostExact := parseCommaSeparatedValues(query.Get("host_name"))
+	checkExact := parseCommaSeparatedValues(query.Get("check_name"))
+	nameExact := parseCommaSeparatedValues(query.Get("name"))
+	hostRegex := query.Get("host_name_regex")
+	checkRegex := query.Get("check_name_regex")
+	nameRegex := query.Get("name_regex")
+	scope := query.Get("scope")
 	count := parseInt(query.Get("count"), defaultPageSize)
 	if count <= 0 {
 		count = defaultPageSize
@@ -622,7 +660,13 @@ func (s *Server) handleDowntimeList(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	entries := s.downtime.List(host, check, name, time.Now())
+	entries := s.downtime.List(hostRegex, checkRegex, nameRegex, time.Now())
+	filtered, err := filterDowntimesByScope(entries, scope)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	entries = filterDowntimesExact(filtered, hostExact, checkExact, nameExact)
 	total := len(entries)
 	if offset > total {
 		offset = total
@@ -808,4 +852,102 @@ func normalizeStatuses(values []string) ([]model.Status, error) {
 		statuses = append(statuses, status)
 	}
 	return statuses, nil
+}
+
+func filterDowntimesByScope(entries []downtime.Entry, scope string) ([]downtime.Entry, error) {
+	scope = strings.TrimSpace(strings.ToLower(scope))
+	if scope == "" || scope == "all" {
+		return entries, nil
+	}
+	matches := func(entry downtime.Entry) bool {
+		switch scope {
+		case "host":
+			return entry.HostName != "" && entry.CheckName == ""
+		case "check":
+			return entry.HostName != "" && entry.CheckName != ""
+		case "global":
+			return entry.HostName == ""
+		default:
+			return false
+		}
+	}
+	if scope != "host" && scope != "check" && scope != "global" {
+		return nil, fmt.Errorf("invalid scope %q", scope)
+	}
+	filtered := make([]downtime.Entry, 0, len(entries))
+	for _, entry := range entries {
+		if matches(entry) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered, nil
+}
+
+func filterDowntimesExact(entries []downtime.Entry, hostExact, checkExact, nameExact []string) []downtime.Entry {
+	result := entries
+	if len(hostExact) > 0 {
+		tmp := make([]downtime.Entry, 0, len(result))
+		allowed := make(map[string]struct{}, len(hostExact))
+		for _, host := range hostExact {
+			allowed[host] = struct{}{}
+		}
+		for _, entry := range result {
+			if _, ok := allowed[entry.HostName]; ok {
+				tmp = append(tmp, entry)
+			}
+		}
+		result = tmp
+	}
+	if len(checkExact) > 0 {
+		tmp := make([]downtime.Entry, 0, len(result))
+		allowed := make(map[string]struct{}, len(checkExact))
+		for _, check := range checkExact {
+			allowed[check] = struct{}{}
+		}
+		for _, entry := range result {
+			if _, ok := allowed[entry.CheckName]; ok {
+				tmp = append(tmp, entry)
+			}
+		}
+		result = tmp
+	}
+	if len(nameExact) > 0 {
+		tmp := make([]downtime.Entry, 0, len(result))
+		allowed := make(map[string]struct{}, len(nameExact))
+		for _, name := range nameExact {
+			allowed[name] = struct{}{}
+		}
+		for _, entry := range result {
+			if _, ok := allowed[entry.Name]; ok {
+				tmp = append(tmp, entry)
+			}
+		}
+		result = tmp
+	}
+	return result
+}
+
+func parseCommaSeparatedValues(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	values := strings.Split(raw, ",")
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

@@ -92,6 +92,14 @@ function encodeStatuses(statuses) {
   return JSON.stringify(values);
 }
 
+function normalizeFilterValue(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const trimmed = value.trim();
+  return trimmed || "";
+}
+
 export async function login(login, password) {
   const res = await userApi.post("/login", { login, password }, { skipNotify: true });
   return res.data;
@@ -101,7 +109,7 @@ export async function logout() {
   await userApi.post("/logout");
 }
 
-export async function fetchHosts({ count, offset, hostNameSearch, statuses } = {}) {
+export async function fetchHosts({ count, offset, hostName, hostNameRegex, statuses } = {}) {
   const params = {};
   if (typeof count === "number") {
     params.count = count;
@@ -109,8 +117,13 @@ export async function fetchHosts({ count, offset, hostNameSearch, statuses } = {
   if (typeof offset === "number") {
     params.offset = offset;
   }
-  if (hostNameSearch) {
-    params.host_name_search = hostNameSearch;
+  const hostExact = normalizeFilterValue(hostName);
+  if (hostExact) {
+    params.host_name = hostExact;
+  }
+  const hostPattern = normalizeFilterValue(hostNameRegex);
+  if (hostPattern) {
+    params.host_name_regex = hostPattern;
   }
   const encodedStatuses = encodeStatuses(statuses);
   if (encodedStatuses) {
@@ -120,7 +133,7 @@ export async function fetchHosts({ count, offset, hostNameSearch, statuses } = {
   return res.data;
 }
 
-export async function fetchCheckSummaries({ count, offset, checkNameSearch, statuses } = {}) {
+export async function fetchCheckSummaries({ count, offset, checkName, checkNameRegex, statuses } = {}) {
   const params = {};
   if (typeof count === "number") {
     params.count = count;
@@ -128,8 +141,13 @@ export async function fetchCheckSummaries({ count, offset, checkNameSearch, stat
   if (typeof offset === "number") {
     params.offset = offset;
   }
-  if (checkNameSearch) {
-    params.check_name_search = checkNameSearch;
+  const checkExact = normalizeFilterValue(checkName);
+  if (checkExact) {
+    params.check_name = checkExact;
+  }
+  const checkPattern = normalizeFilterValue(checkNameRegex);
+  if (checkPattern) {
+    params.check_name_regex = checkPattern;
   }
   const encodedStatuses = encodeStatuses(statuses);
   if (encodedStatuses) {
@@ -147,11 +165,13 @@ export async function fetchCheckDetails({ count, offset, hostName, checkName, st
   if (typeof offset === "number") {
     params.offset = offset;
   }
-  if (hostName) {
-    params.host_name = hostName;
+  const hostExact = normalizeFilterValue(hostName);
+  if (hostExact) {
+    params.host_name = hostExact;
   }
-  if (checkName) {
-    params.check_name = checkName;
+  const checkExact = normalizeFilterValue(checkName);
+  if (checkExact) {
+    params.check_name = checkExact;
   }
   const encodedStatuses = encodeStatuses(statuses);
   if (encodedStatuses) {
@@ -167,7 +187,17 @@ export async function deleteDowntime(name) {
   });
 }
 
-export async function fetchDowntimes({ count, offset, hostName, checkName, name } = {}) {
+export async function fetchDowntimes({
+  count,
+  offset,
+  hostName,
+  hostNameRegex,
+  checkName,
+  checkNameRegex,
+  name,
+  nameRegex,
+  scope,
+} = {}) {
   const params = {};
   if (typeof count === "number") {
     params.count = count;
@@ -175,14 +205,32 @@ export async function fetchDowntimes({ count, offset, hostName, checkName, name 
   if (typeof offset === "number") {
     params.offset = offset;
   }
-  if (hostName) {
-    params.host_name = hostName;
+  const hostExact = normalizeFilterValue(hostName);
+  if (hostExact) {
+    params.host_name = hostExact;
   }
-  if (checkName) {
-    params.check_name = checkName;
+  const hostPattern = normalizeFilterValue(hostNameRegex);
+  if (hostPattern) {
+    params.host_name_regex = hostPattern;
   }
-  if (name) {
-    params.name = name;
+  const checkExact = normalizeFilterValue(checkName);
+  if (checkExact) {
+    params.check_name = checkExact;
+  }
+  const checkPattern = normalizeFilterValue(checkNameRegex);
+  if (checkPattern) {
+    params.check_name_regex = checkPattern;
+  }
+  const nameExact = normalizeFilterValue(name);
+  if (nameExact) {
+    params.name = nameExact;
+  }
+  const namePattern = normalizeFilterValue(nameRegex);
+  if (namePattern) {
+    params.name_regex = namePattern;
+  }
+  if (scope && scope !== "all") {
+    params.scope = scope;
   }
   const res = await protectedApi.get("/downtime", { params });
   return res.data;
