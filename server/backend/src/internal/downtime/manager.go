@@ -84,6 +84,12 @@ func (m *Manager) Add(host, check, name string, from, to time.Time) (Entry, erro
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if name == "" {
+		return Entry{}, fmt.Errorf("name is required")
+	}
+	if m.nameExistsLocked(name) {
+		return Entry{}, fmt.Errorf("downtime %s already exists", name)
+	}
 	var entry Entry
 	var err error
 	if host == "" {
@@ -331,6 +337,23 @@ func (m *Manager) logDowntimeAdded(entry Entry) {
 
 func (m *Manager) logDowntimeRemoved(entry Entry) {
 	m.logger.Infof("downtime removed name=%s host=%s check=%s", entry.Name, entry.HostName, entry.CheckName)
+}
+
+func (m *Manager) nameExistsLocked(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, bucket := range m.hostEntries {
+		if _, ok := bucket[name]; ok {
+			return true
+		}
+	}
+	for _, bucket := range m.entries {
+		if _, ok := bucket[name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) removeCheckLocked(host, check, name string) bool {

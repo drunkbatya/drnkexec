@@ -112,7 +112,8 @@
                     v-model="hostExpanded[host.Hostname]"
                     @show="() => loadHostChecks(host.Hostname)"
                     expand-separator
-                    header-class="bg-grey-2 text-dark text-weight-medium"
+                    :header-class="hostHeaderClass(host)"
+                    :class="hostHasDowntime(host) ? 'downtime-active' : ''"
                   >
                     <template #header>
                       <q-item-section avatar>
@@ -129,14 +130,25 @@
                         </div>
                       </q-item-section>
                       <q-item-section side>
-                        <q-btn
-                          size="sm"
-                          flat
-                          color="primary"
-                          icon="add"
-                          label="Create Downtime"
-                          @click.stop="openDowntimeDialogForHost(host.Hostname)"
-                        />
+                        <div class="row no-wrap q-gutter-sm">
+                          <q-btn
+                            size="sm"
+                            flat
+                            color="primary"
+                            icon="add"
+                            label="Create Downtime"
+                            @click.stop="openDowntimeDialogForHost(host.Hostname)"
+                          />
+                          <q-btn
+                            v-if="hostHasDowntime(host)"
+                            size="sm"
+                            flat
+                            color="primary"
+                            icon="schedule"
+                            label="Go to Downtime"
+                            @click.stop="goToDowntimesForHost(host)"
+                          />
+                        </div>
                       </q-item-section>
                     </template>
 
@@ -206,6 +218,15 @@
                               icon="add"
                               label="Create Downtime"
                               @click="openDowntimeDialogForCheckInstance(host.Hostname, props.row.CheckName)"
+                            />
+                            <q-btn
+                              v-if="checkInstanceHasDowntime(props.row)"
+                              size="sm"
+                              flat
+                              color="primary"
+                              icon="schedule"
+                              label="Go to Downtime"
+                              @click="goToDowntimesForCheckInstance(host.Hostname, props.row.CheckName, props.row.Downtimes)"
                             />
                           </q-td>
                         </template>
@@ -319,7 +340,8 @@
                     v-model="checkExpanded[group.CheckName]"
                     @show="() => loadCheckDetails(group.CheckName)"
                     expand-separator
-                    header-class="bg-grey-2 text-dark text-weight-medium"
+                    :header-class="checkHeaderClass(group)"
+                    :class="checkHasDowntime(group) ? 'downtime-active' : ''"
                   >
                     <template #header>
                       <q-item-section avatar>
@@ -336,14 +358,25 @@
                         </div>
                       </q-item-section>
                       <q-item-section side>
-                        <q-btn
-                          size="sm"
-                          flat
-                          color="primary"
-                          icon="add"
-                          label="Create Downtime"
-                          @click.stop="openDowntimeDialogForCheck({ checkName: group.CheckName })"
-                        />
+                        <div class="row no-wrap q-gutter-sm">
+                          <q-btn
+                            size="sm"
+                            flat
+                            color="primary"
+                            icon="add"
+                            label="Create Downtime"
+                            @click.stop="openDowntimeDialogForCheck({ checkName: group.CheckName })"
+                          />
+                          <q-btn
+                            v-if="checkHasDowntime(group)"
+                            size="sm"
+                            flat
+                            color="primary"
+                            icon="schedule"
+                            label="Go to Downtime"
+                            @click.stop="goToDowntimesForCheckSummary(group)"
+                          />
+                        </div>
                       </q-item-section>
                     </template>
 
@@ -414,6 +447,15 @@
                               label="Create Downtime"
                               @click="openDowntimeDialogForCheckInstance(props.row.Hostname, props.row.CheckName)"
                             />
+                            <q-btn
+                              v-if="checkInstanceHasDowntime(props.row)"
+                              size="sm"
+                              flat
+                              color="primary"
+                              icon="schedule"
+                              label="Go to Downtime"
+                              @click="goToDowntimesForCheckInstance(props.row.Hostname, props.row.CheckName, props.row.Downtimes)"
+                            />
                           </q-td>
                         </template>
                       </q-table>
@@ -478,8 +520,52 @@
               </q-card-section>
               <q-separator />
               <div class="q-pa-md">
-                <div class="row q-col-gutter-md q-mb-md">
-                  <div class="col-12 col-md-6">
+                <div class="row q-col-gutter-md q-mb-md items-start">
+                  <div class="col-12 col-md-3">
+                    <div class="row items-center no-wrap">
+                      <div class="col">
+                        <q-input
+                          v-model="downtimeHostFilter"
+                          label="Filter by host"
+                          dense
+                          outlined
+                          clearable
+                          debounce="0"
+                          @update:model-value="handleDowntimeHostFilterInput"
+                        >
+                          <template #prepend>
+                            <q-icon name="dns" />
+                          </template>
+                        </q-input>
+                      </div>
+                      <div class="q-ml-sm">
+                        <q-checkbox v-model="downtimeHostExact" label="Exact match" dense />
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-md-3">
+                    <div class="row items-center no-wrap">
+                      <div class="col">
+                        <q-input
+                          v-model="downtimeCheckFilter"
+                          label="Filter by check"
+                          dense
+                          outlined
+                          clearable
+                          debounce="0"
+                          @update:model-value="handleDowntimeCheckFilterInput"
+                        >
+                          <template #prepend>
+                            <q-icon name="fact_check" />
+                          </template>
+                        </q-input>
+                      </div>
+                      <div class="q-ml-sm">
+                        <q-checkbox v-model="downtimeCheckExact" label="Exact match" dense />
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-md-3">
                     <div class="row items-center no-wrap">
                       <div class="col">
                         <q-input
@@ -501,7 +587,7 @@
                       </div>
                     </div>
                   </div>
-                  <div class="col-12 col-md-6">
+                  <div class="col-12 col-md-3">
                     <q-select
                       v-model="downtimeScope"
                       :options="downtimeScopeOptions"
@@ -739,9 +825,16 @@ const downtimePagination = reactive({
   rowsNumber: 0,
   count: 0,
 });
+const downtimeHostFilter = ref("");
+let downtimeHostTimer;
+const downtimeHostExact = ref(false);
+const downtimeCheckFilter = ref("");
+let downtimeCheckTimer;
+const downtimeCheckExact = ref(false);
 const downtimeNameFilter = ref("");
 let downtimeNameTimer;
 const downtimeNameExact = ref(false);
+let suppressDowntimeReload = false;
 const downtimeDialog = reactive({
   open: false,
   mode: "relative",
@@ -758,6 +851,52 @@ const downtimeDeleteDialog = reactive({
   name: "",
   submitting: false,
 });
+
+function normalizeDowntimeNames(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  return list
+    .map((name) => (typeof name === "string" ? name.trim() : ""))
+    .filter((name) => Boolean(name));
+}
+
+function mapHostResponse(host = {}) {
+  return {
+    Hostname: host?.hostname || "",
+    CheckCount: typeof host?.check_count === "number" ? host.check_count : 0,
+    OK: typeof host?.ok === "number" ? host.ok : 0,
+    Warning: typeof host?.warning === "number" ? host.warning : 0,
+    Critical: typeof host?.critical === "number" ? host.critical : 0,
+    Unknown: typeof host?.unknown === "number" ? host.unknown : 0,
+    Downtimes: normalizeDowntimeNames(host?.downtimes),
+  };
+}
+
+function mapCheckSummaryResponse(check = {}) {
+  return {
+    CheckName: check?.check_name || "",
+    HostCount: typeof check?.host_count === "number" ? check.host_count : 0,
+    OK: typeof check?.ok === "number" ? check.ok : 0,
+    Warning: typeof check?.warning === "number" ? check.warning : 0,
+    Critical: typeof check?.critical === "number" ? check.critical : 0,
+    Unknown: typeof check?.unknown === "number" ? check.unknown : 0,
+    Downtimes: normalizeDowntimeNames(check?.downtimes),
+  };
+}
+
+function mapCheckDetailResponse(detail = {}) {
+  return {
+    Hostname: detail?.hostname || "",
+    CheckName: detail?.check_name || "",
+    Status: detail?.status || "unknown",
+    Output: typeof detail?.output === "string" ? detail.output : "",
+    UpdatedAt: detail?.updated_at || "",
+    FailCount: typeof detail?.fail_count === "number" ? detail.fail_count : 0,
+    FailThreshold: typeof detail?.fail_threshold === "number" ? detail.fail_threshold : 0,
+    Downtimes: normalizeDowntimeNames(detail?.downtimes),
+  };
+}
 
 const hostCheckColumns = [
   {
@@ -932,8 +1071,9 @@ async function loadHosts(nextPage, options = {}) {
       hostNameRegex: pattern,
       statuses: activeStatuses(),
     });
-    hosts.value = data.hosts || [];
-    hostPagination.count = data.count ?? hosts.value.length;
+    const mappedHosts = Array.isArray(data.hosts) ? data.hosts.map(mapHostResponse) : [];
+    hosts.value = mappedHosts;
+    hostPagination.count = data.count ?? mappedHosts.length;
     hostPagination.rowsNumber = data.total ?? hostPagination.count;
     const maxPage = hostMaxPage.value;
     if (page > maxPage && maxPage > 0) {
@@ -1003,8 +1143,9 @@ async function loadCheckSummaries(nextPage, options = {}) {
       checkNameRegex: pattern,
       statuses: activeStatuses(),
     });
-    checkSummaries.value = data.checks || [];
-    checkPagination.count = data.count ?? checkSummaries.value.length;
+    const mappedChecks = Array.isArray(data.checks) ? data.checks.map(mapCheckSummaryResponse) : [];
+    checkSummaries.value = mappedChecks;
+    checkPagination.count = data.count ?? mappedChecks.length;
     checkPagination.rowsNumber = data.total ?? checkPagination.count;
     const maxPage = checkMaxPage.value;
     if (page > maxPage && maxPage > 0) {
@@ -1080,8 +1221,9 @@ async function loadHostChecks(hostname, nextPage) {
       offset,
       statuses: activeStatuses(),
     });
-    state.items = data.items || [];
-    state.count = data.count ?? state.items.length;
+    const mappedItems = Array.isArray(data.items) ? data.items.map(mapCheckDetailResponse) : [];
+    state.items = mappedItems;
+    state.count = data.count ?? mappedItems.length;
     state.rowsNumber = data.total ?? state.count;
     const maxPage = hostChecksMaxPage(hostname);
     if (page > maxPage && maxPage > 0) {
@@ -1158,8 +1300,9 @@ async function loadCheckDetails(checkName, nextPage) {
       offset,
       statuses: activeStatuses(),
     });
-    state.items = data.items || [];
-    state.count = data.count ?? state.items.length;
+    const mappedItems = Array.isArray(data.items) ? data.items.map(mapCheckDetailResponse) : [];
+    state.items = mappedItems;
+    state.count = data.count ?? mappedItems.length;
     state.rowsNumber = data.total ?? state.count;
     const maxPage = checkDetailsMaxPage(checkName);
     if (page > maxPage && maxPage > 0) {
@@ -1217,13 +1360,21 @@ async function loadDowntimes(nextPage) {
   const offset = (page - 1) * perPage;
   loadingDowntimes.value = true;
   try {
-    const exactFilter = downtimeNameExact.value ? sanitizeOptional(downtimeNameFilter.value) : undefined;
-    const pattern = downtimeNameExact.value ? "" : buildSearchPattern(downtimeNameFilter.value);
+    const hostExact = downtimeHostExact.value ? sanitizeOptional(downtimeHostFilter.value) : undefined;
+    const hostPattern = downtimeHostExact.value ? "" : buildSearchPattern(downtimeHostFilter.value);
+    const checkExact = downtimeCheckExact.value ? sanitizeOptional(downtimeCheckFilter.value) : undefined;
+    const checkPattern = downtimeCheckExact.value ? "" : buildSearchPattern(downtimeCheckFilter.value);
+    const nameExact = downtimeNameExact.value ? sanitizeOptional(downtimeNameFilter.value) : undefined;
+    const namePattern = downtimeNameExact.value ? "" : buildSearchPattern(downtimeNameFilter.value);
     const data = await fetchDowntimes({
       count: perPage,
       offset,
-      name: exactFilter,
-      nameRegex: pattern,
+      hostName: hostExact,
+      hostNameRegex: hostPattern || undefined,
+      checkName: checkExact,
+      checkNameRegex: checkPattern || undefined,
+      name: nameExact,
+      nameRegex: namePattern || undefined,
       scope: downtimeScope.value,
     });
     downtimes.value = data.items || [];
@@ -1261,6 +1412,32 @@ function handleDowntimeFilterInput() {
   }, 200);
 }
 
+function handleDowntimeHostFilterInput() {
+  if (downtimeHostTimer) {
+    clearTimeout(downtimeHostTimer);
+  }
+  downtimeHostTimer = setTimeout(() => {
+    downtimePagination.page = 1;
+    if (suppressDowntimeReload) {
+      return;
+    }
+    loadDowntimes();
+  }, 200);
+}
+
+function handleDowntimeCheckFilterInput() {
+  if (downtimeCheckTimer) {
+    clearTimeout(downtimeCheckTimer);
+  }
+  downtimeCheckTimer = setTimeout(() => {
+    downtimePagination.page = 1;
+    if (suppressDowntimeReload) {
+      return;
+    }
+    loadDowntimes();
+  }, 200);
+}
+
 function openDowntimeDialog() {
   resetDowntimeDialog();
   downtimeDialog.open = true;
@@ -1283,6 +1460,65 @@ function openDowntimeDialogForCheckInstance(hostName, checkName) {
   downtimeDialog.hostName = hostName;
   downtimeDialog.checkName = checkName;
   downtimeDialog.open = true;
+}
+
+function goToDowntimesForHost(host) {
+  if (!host) {
+    return;
+  }
+  openDowntimesWithFilters({
+    hostName: host.Hostname,
+    downtimes: host.Downtimes,
+  });
+}
+
+function goToDowntimesForCheckSummary(group) {
+  if (!group) {
+    return;
+  }
+  openDowntimesWithFilters({
+    checkName: group.CheckName,
+    downtimes: group.Downtimes,
+  });
+}
+
+function goToDowntimesForCheckInstance(hostName, checkName, downtimes) {
+  openDowntimesWithFilters({
+    hostName,
+    checkName,
+    downtimes,
+  });
+}
+
+function openDowntimesWithFilters({ hostName, checkName, downtimes }) {
+  const hostValue = sanitizeOptional(hostName) || "";
+  const checkValue = sanitizeOptional(checkName) || "";
+  const nameList = Array.isArray(downtimes) ? downtimes : [];
+  withDowntimeFiltersSuppressed(() => {
+    downtimeHostFilter.value = hostValue;
+    downtimeHostExact.value = Boolean(hostValue);
+    downtimeCheckFilter.value = checkValue;
+    downtimeCheckExact.value = Boolean(checkValue);
+    if (!hostValue && !checkValue && nameList.length > 0) {
+      downtimeNameFilter.value = nameList[0];
+      downtimeNameExact.value = true;
+    } else {
+      downtimeNameFilter.value = "";
+      downtimeNameExact.value = false;
+    }
+  });
+  downtimePagination.page = 1;
+  activeTab.value = "downtimes";
+  loadDowntimes();
+}
+
+function withDowntimeFiltersSuppressed(fn) {
+  suppressDowntimeReload = true;
+  try {
+    fn();
+  } finally {
+    suppressDowntimeReload = false;
+  }
 }
 
 function closeDowntimeDialog() {
@@ -1466,6 +1702,25 @@ watch(downtimeScope, () => {
 });
 
 watch(downtimeNameExact, () => {
+  if (suppressDowntimeReload) {
+    return;
+  }
+  downtimePagination.page = 1;
+  loadDowntimes();
+});
+
+watch(downtimeHostExact, () => {
+  if (suppressDowntimeReload) {
+    return;
+  }
+  downtimePagination.page = 1;
+  loadDowntimes();
+});
+
+watch(downtimeCheckExact, () => {
+  if (suppressDowntimeReload) {
+    return;
+  }
   downtimePagination.page = 1;
   loadDowntimes();
 });
@@ -1500,6 +1755,42 @@ function hostStatusColor(host) {
     return "grey";
   }
   return "grey";
+}
+
+function hasDowntimeList(list) {
+  return Array.isArray(list) && list.length > 0;
+}
+
+function hostHasDowntime(host) {
+  return hasDowntimeList(host?.Downtimes);
+}
+
+function checkHasDowntime(item) {
+  return hasDowntimeList(item?.Downtimes);
+}
+
+function checkInstanceHasDowntime(row) {
+  return hasDowntimeList(row?.Downtimes);
+}
+
+function hostHeaderClass(host) {
+  const classes = ["text-weight-medium"];
+  if (hostHasDowntime(host)) {
+    classes.push("bg-grey-4", "text-grey-8");
+  } else {
+    classes.push("bg-grey-2", "text-dark");
+  }
+  return classes.join(" ");
+}
+
+function checkHeaderClass(group) {
+  const classes = ["text-weight-medium"];
+  if (checkHasDowntime(group)) {
+    classes.push("bg-grey-4", "text-grey-8");
+  } else {
+    classes.push("bg-grey-2", "text-dark");
+  }
+  return classes.join(" ");
 }
 
 function hostKey(row) {
@@ -1645,3 +1936,9 @@ async function runCheckNow(row) {
   }
 }
 </script>
+
+<style scoped>
+.downtime-active {
+  opacity: 0.7;
+}
+</style>

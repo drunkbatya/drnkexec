@@ -37,24 +37,6 @@ const (
 	defaultPageSize   = 20
 )
 
-type responseHosts struct {
-	Hosts []state.HostSummary `json:"hosts"`
-	Count int                 `json:"count"`
-	Total int                 `json:"total"`
-}
-
-type responseCheckSummaries struct {
-	Checks []state.CheckSummary `json:"checks"`
-	Count  int                  `json:"count"`
-	Total  int                  `json:"total"`
-}
-
-type responseCheckDetails struct {
-	Items []state.CheckInfo `json:"items"`
-	Count int               `json:"count"`
-	Total int               `json:"total"`
-}
-
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -277,7 +259,7 @@ func (s *Server) handleAppVersion(w http.ResponseWriter, r *http.Request) {
 // @Param host_name query string false "Comma-separated list of host names (exact match)"
 // @Param host_name_regex query string false "Regex or prefix filter by host name"
 // @Param statuses query string false "JSON array of statuses to include"
-// @Success 200 {object} responseHosts
+// @Success 200 {object} model.HostsResponse
 // @Failure 403 {object} errorResponse
 // @Router /api/v1/admin/hosts [get]
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
@@ -323,8 +305,15 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	if end > total {
 		end = total
 	}
-	items := all[offset:end]
-	data := responseHosts{Hosts: items, Count: len(items), Total: total}
+	now := time.Now()
+	downtimeIdx := s.buildDowntimeIndex(now)
+	paged := all[offset:end]
+	items := make([]model.HostInfo, 0, len(paged))
+	for _, summary := range paged {
+		names := combineDowntimeNames(downtimeIdx.global, downtimeIdx.host[summary.Hostname])
+		items = append(items, toHostInfo(summary, names))
+	}
+	data := model.HostsResponse{Hosts: items, Count: len(items), Total: total}
 	s.writeJSON(w, http.StatusOK, data)
 }
 
@@ -338,7 +327,7 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 // @Param check_name query string false "Comma-separated list of check names (exact match)"
 // @Param check_name_regex query string false "Regex or prefix filter by check name"
 // @Param statuses query string false "JSON array of statuses to include"
-// @Success 200 {object} responseCheckSummaries
+// @Success 200 {object} model.CheckSummariesResponse
 // @Failure 403 {object} errorResponse
 // @Router /api/v1/admin/checks [get]
 func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
@@ -384,8 +373,20 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 	if end > total {
 		end = total
 	}
-	items := summaries[offset:end]
-	s.writeJSON(w, http.StatusOK, responseCheckSummaries{Checks: items, Count: len(items), Total: total})
+	now := time.Now()
+	downtimeIdx := s.buildDowntimeIndex(now)
+	checkHostDowntimes := s.buildCheckDowntimesFromHosts(downtimeIdx)
+	paged := summaries[offset:end]
+	items := make([]model.CheckSummaryInfo, 0, len(paged))
+	for _, summary := range paged {
+		names := combineDowntimeNames(
+			downtimeIdx.global,
+			downtimeIdx.checkAggregate[summary.CheckName],
+			checkHostDowntimes[summary.CheckName],
+		)
+		items = append(items, toCheckSummaryInfo(summary, names))
+	}
+	s.writeJSON(w, http.StatusOK, model.CheckSummariesResponse{Checks: items, Count: len(items), Total: total})
 }
 
 // handleCheckDetails godoc
@@ -398,7 +399,7 @@ func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
 // @Param statuses query string false "JSON array of statuses to include"
 // @Param count query int false "Number of records to return (default 20)"
 // @Param offset query int false "Number of records to skip (>=0)"
-// @Success 200 {object} responseCheckDetails
+// @Success 200 {object} model.CheckDetailsResponse
 // @Failure 403 {object} errorResponse
 // @Failure 404 {object} errorResponse "Host not found"
 // @Router /api/v1/admin/checks/detail [get]
@@ -445,8 +446,19 @@ func (s *Server) handleCheckDetails(w http.ResponseWriter, r *http.Request) {
 	if end > total {
 		end = total
 	}
-	items := checks[offset:end]
-	s.writeJSON(w, http.StatusOK, responseCheckDetails{Items: items, Count: len(items), Total: total})
+	now := time.Now()
+	downtimeIdx := s.buildDowntimeIndex(now)
+	paged := checks[offset:end]
+	items := make([]model.CheckDetailInfo, 0, len(paged))
+	for _, chk := range paged {
+		names := combineDowntimeNames(
+			downtimeIdx.global,
+			downtimeIdx.host[chk.Hostname],
+			downtimeIdx.checkNames(chk.Hostname, chk.CheckName),
+		)
+		items = append(items, toCheckDetailInfo(chk, names))
+	}
+	s.writeJSON(w, http.StatusOK, model.CheckDetailsResponse{Items: items, Count: len(items), Total: total})
 }
 
 type downtimeRequest struct {
@@ -852,6 +864,141 @@ func normalizeStatuses(values []string) ([]model.Status, error) {
 		statuses = append(statuses, status)
 	}
 	return statuses, nil
+}
+
+func toHostInfo(summary state.HostSummary, downtimes []string) model.HostInfo {
+	return model.HostInfo{
+		Hostname:   summary.Hostname,
+		CheckCount: summary.CheckCount,
+		OK:         summary.OK,
+		Warning:    summary.Warning,
+		Critical:   summary.Critical,
+		Unknown:    summary.Unknown,
+		Downtimes:  downtimes,
+	}
+}
+
+func toCheckSummaryInfo(summary state.CheckSummary, downtimes []string) model.CheckSummaryInfo {
+	return model.CheckSummaryInfo{
+		CheckName: summary.CheckName,
+		HostCount: summary.HostCount,
+		OK:        summary.OK,
+		Warning:   summary.Warning,
+		Critical:  summary.Critical,
+		Unknown:   summary.Unknown,
+		Downtimes: downtimes,
+	}
+}
+
+func toCheckDetailInfo(info state.CheckInfo, downtimes []string) model.CheckDetailInfo {
+	return model.CheckDetailInfo{
+		Hostname:      info.Hostname,
+		CheckName:     info.CheckName,
+		Status:        info.Status,
+		Output:        info.Output,
+		UpdatedAt:     info.UpdatedAt,
+		FailCount:     info.FailCount,
+		FailThreshold: info.FailThreshold,
+		Downtimes:     downtimes,
+	}
+}
+
+type downtimeIndex struct {
+	global         []string
+	host           map[string][]string
+	check          map[string]map[string][]string
+	checkAggregate map[string][]string
+}
+
+func (s *Server) buildDowntimeIndex(now time.Time) *downtimeIndex {
+	entries := s.downtime.List("", "", "", now)
+	idx := &downtimeIndex{
+		host:           make(map[string][]string),
+		check:          make(map[string]map[string][]string),
+		checkAggregate: make(map[string][]string),
+	}
+	for _, entry := range entries {
+		switch {
+		case entry.HostName == "" && entry.CheckName == "":
+			idx.global = appendUniqueName(idx.global, entry.Name)
+		case entry.HostName != "" && entry.CheckName == "":
+			idx.host[entry.HostName] = appendUniqueName(idx.host[entry.HostName], entry.Name)
+		case entry.HostName != "" && entry.CheckName != "":
+			hostChecks := idx.check[entry.HostName]
+			if hostChecks == nil {
+				hostChecks = make(map[string][]string)
+				idx.check[entry.HostName] = hostChecks
+			}
+			hostChecks[entry.CheckName] = appendUniqueName(hostChecks[entry.CheckName], entry.Name)
+			idx.checkAggregate[entry.CheckName] = appendUniqueName(idx.checkAggregate[entry.CheckName], entry.Name)
+		default:
+			idx.global = appendUniqueName(idx.global, entry.Name)
+		}
+	}
+	return idx
+}
+
+func (idx *downtimeIndex) checkNames(hostname, checkName string) []string {
+	if idx == nil {
+		return nil
+	}
+	if hostChecks, ok := idx.check[hostname]; ok {
+		return hostChecks[checkName]
+	}
+	return nil
+}
+
+func (s *Server) buildCheckDowntimesFromHosts(idx *downtimeIndex) map[string][]string {
+	result := make(map[string][]string)
+	if idx == nil {
+		return result
+	}
+	for host, names := range idx.host {
+		if len(names) == 0 {
+			continue
+		}
+		checks, ok := s.state.HostChecks(host)
+		if !ok {
+			continue
+		}
+		for _, chk := range checks {
+			result[chk.CheckName] = combineDowntimeNames(result[chk.CheckName], names)
+		}
+	}
+	return result
+}
+
+func appendUniqueName(names []string, name string) []string {
+	if name == "" {
+		return names
+	}
+	for _, existing := range names {
+		if existing == name {
+			return names
+		}
+	}
+	return append(names, name)
+}
+
+func combineDowntimeNames(lists ...[]string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0)
+	for _, list := range lists {
+		for _, name := range list {
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			result = append(result, name)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func filterDowntimesByScope(entries []downtime.Entry, scope string) ([]downtime.Entry, error) {

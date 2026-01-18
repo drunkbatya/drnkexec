@@ -41,7 +41,7 @@ func TestHandleHostsAndChecks(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d", rr.Code)
 	}
-	var hosts responseHosts
+	var hosts model.HostsResponse
 	if err := json.NewDecoder(rr.Body).Decode(&hosts); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestHandleHostsAndChecks(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d", rr.Code)
 	}
-	var checksResp responseCheckSummaries
+	var checksResp model.CheckSummariesResponse
 	if err := json.NewDecoder(rr.Body).Decode(&checksResp); err != nil {
 		t.Fatalf("decode checks: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestHandleHostsAndChecks(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d", rr.Code)
 	}
-	var detailResp responseCheckDetails
+	var detailResp model.CheckDetailsResponse
 	if err := json.NewDecoder(rr.Body).Decode(&detailResp); err != nil {
 		t.Fatalf("decode detail: %v", err)
 	}
