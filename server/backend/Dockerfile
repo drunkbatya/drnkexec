@@ -37,6 +37,6 @@ RUN LDFLAGS="-X github.com/drunkbatya/drnkexec/internal/version.gitCommit=${GIT_
 
 FROM debian:trixie
 WORKDIR /app
-#RUN apt update && apt -y install openssl ca-certificates
+RUN apt update && apt -y install openssl ca-certificates
 COPY --from=builder /app/bin/drnkexec /usr/local/bin/drnkexec
 ENTRYPOINT ["/usr/local/bin/drnkexec"]

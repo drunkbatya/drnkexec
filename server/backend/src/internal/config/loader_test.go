@@ -6,16 +6,6 @@ import (
 	"github.com/drunkbatya/drnkexec/internal/model"
 )
 
-func TestInheritAlertRepeatIntervalFromDefaults(t *testing.T) {
-	def := model.Defaults{AlertRepeatIntervalSec: 45}
-	alert := model.AlertManagerConfig{}
-	inheritAlertRepeatInterval(def, &alert)
-	applyAlertDefaults(&alert)
-	if alert.RepeatIntervalSec != 45 {
-		t.Fatalf("expected repeat interval 45, got %d", alert.RepeatIntervalSec)
-	}
-}
-
 func TestInheritAlertRepeatIntervalRespectsExplicitValue(t *testing.T) {
 	def := model.Defaults{AlertRepeatIntervalSec: 10}
 	alert := model.AlertManagerConfig{RepeatIntervalSec: 90}

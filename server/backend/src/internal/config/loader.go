@@ -43,7 +43,6 @@ func Load(path string) (*model.Config, error) {
 	}
 
 	applyDefaultsSection(&diskCfg.Defaults)
-	inheritAlertRepeatInterval(diskCfg.Defaults, &diskCfg.AlertManager)
 	applyAlertDefaults(&diskCfg.AlertManager)
 	applyHTTPDefaults(&diskCfg.HTTP)
 	applyAdminDefaults(&diskCfg.Admin)
@@ -93,12 +92,6 @@ func applyAlertDefaults(cfg *model.AlertManagerConfig) {
 	}
 }
 
-func inheritAlertRepeatInterval(def model.Defaults, alert *model.AlertManagerConfig) {
-	if alert.RepeatIntervalSec <= 0 {
-		alert.RepeatIntervalSec = def.AlertRepeatIntervalSec
-	}
-}
-
 func applyHTTPDefaults(cfg *model.HTTPConfig) {
 	if cfg.Host == "" {
 		cfg.Host = defaultHTTPHost
@@ -123,9 +116,6 @@ func wrapYAMLError(path string, err error) error {
 }
 
 func applyDefaultsSection(def *model.Defaults) {
-	if def.AlertRepeatIntervalSec <= 0 {
-		def.AlertRepeatIntervalSec = defaultAlertRepeatIntervalSec
-	}
 	if def.Nrpe.TLS.Enabled == nil {
 		def.Nrpe.TLS.Enabled = boolPtr(true)
 	}

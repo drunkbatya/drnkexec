@@ -44,7 +44,6 @@ type NrpeTLSConfig struct {
 }
 
 type Defaults struct {
-	AlertRepeatIntervalSec int             `yaml:"alert_repeat_interval_sec"`
 	Nrpe                   DefaultsNrpe    `yaml:"nrpe"`
 	Scheduler              SchedulerConfig `yaml:"scheduler"`
 }
