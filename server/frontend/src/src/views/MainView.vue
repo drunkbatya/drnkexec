@@ -1726,7 +1726,7 @@ watch(downtimeCheckExact, () => {
 });
 
 function statusColor(status) {
-  switch (status) {
+  switch (typeof status === "string" ? status.trim().toLowerCase() : "") {
     case "ok":
       return "positive";
     case "warning":
