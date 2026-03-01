@@ -1,4 +1,4 @@
-FROM golang:1.25.5-alpine3.23 AS builder
+FROM golang:1.25.5-trixie AS builder
 WORKDIR /app
 
 ARG GIT_COMMIT
@@ -14,7 +14,7 @@ RUN test -n "$BUILD_TIME"
 ARG BUILD_VERSION
 RUN test -n "$BUILD_VERSION"
 
-RUN apk add --no-cache build-base openssl-dev
+RUN apt update && apt -y install libssl-dev build-essential
 
 ENV CGO_ENABLED=1
 ENV PATH=/go/bin:$PATH
@@ -35,8 +35,8 @@ RUN LDFLAGS="-X github.com/drunkbatya/drnkexec/internal/version.gitCommit=${GIT_
     -X github.com/drunkbatya/drnkexec/internal/version.buildVersion=${BUILD_VERSION}" && \
     go build -ldflags "$LDFLAGS" -o /app/bin/drnkexec ./cmd/drnkexec
 
-FROM alpine:3.23
+FROM debian:trixie
 WORKDIR /app
-#RUN apk add --no-cache openssl ca-certificates
+#RUN apt update && apt -y install openssl ca-certificates
 COPY --from=builder /app/bin/drnkexec /usr/local/bin/drnkexec
 ENTRYPOINT ["/usr/local/bin/drnkexec"]
