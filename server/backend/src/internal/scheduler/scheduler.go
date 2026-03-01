@@ -116,7 +116,7 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 		s.logger.Debugf("check ok host=%s check=%s output=%s", assignment.Host.Hostname, assignment.Check.Name, output)
 		if state.alertActive && state.consecutiveSuccess >= assignment.Check.MinSuccessBeforeResolve {
 			if !s.inDowntime(assignment) {
-				s.alerts.Resolve(ctx, assignment, output, result)
+				s.alerts.Resolve(ctx, assignment, output, statusForState)
 				state.alertActive = false
 			} else {
 				s.logger.Infof("check resolve suppressed due to downtime host=%s check=%s", assignment.Host.Hostname, assignment.Check.Name)
@@ -138,7 +138,7 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 	if !state.alertActive {
 		state.alertActive = true
 	}
-	s.alerts.Alert(ctx, assignment, output, result)
+	s.alerts.Alert(ctx, assignment, output, statusForState)
 
 	return secondsToDuration(assignment.Check.CheckIntervalSec)
 }

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/model"
-	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
 	"go.uber.org/zap"
 )
 
@@ -35,17 +34,17 @@ func NewManager(logger *zap.SugaredLogger, notifiers []Notifier, repeatInterval 
 	}
 }
 
-func (m *Manager) Alert(ctx context.Context, assignment model.CheckAssignment, output string, result nrpeclient.Result) {
+func (m *Manager) Alert(ctx context.Context, assignment model.CheckAssignment, output string, status model.Status) {
 	key := m.keyFor(assignment)
 	if !m.shouldSendAlert(key) {
 		return
 	}
 	text := fmt.Sprintf("%s for %s is %s: %s",
-		assignment.Check.Name, assignment.Host.Hostname, result.Status, output)
+		assignment.Check.Name, assignment.Host.Hostname, status, output)
 	m.dispatch(ctx, assignment, text)
 }
 
-func (m *Manager) Resolve(ctx context.Context, assignment model.CheckAssignment, output string, result nrpeclient.Result) {
+func (m *Manager) Resolve(ctx context.Context, assignment model.CheckAssignment, output string, status model.Status) {
 	key := m.keyFor(assignment)
 
 	m.mu.Lock()
@@ -56,8 +55,8 @@ func (m *Manager) Resolve(ctx context.Context, assignment model.CheckAssignment,
 	delete(m.active, key)
 	m.mu.Unlock()
 
-	text := fmt.Sprintf("[RESOLVED] host=%s (%s) check=%s command=%s output=%s",
-		assignment.Host.Name, assignment.Host.Hostname, assignment.Check.Name, assignment.Check.Command, output)
+	text := fmt.Sprintf("[RESOLVED]: %s for %s is %s: %s",
+		assignment.Check.Name, assignment.Host.Hostname, status, output)
 	m.dispatch(ctx, assignment, text)
 }
 
