@@ -30,7 +30,6 @@ func NewScheduler(logger *zap.SugaredLogger, client nrpeclient.Client, alerts *a
 	return &Scheduler{logger: logger, client: client, alerts: alerts, pinger: pinger, state: state, downtime: downtime, triggers: make(map[string]chan struct{})}
 }
 
-// Run starts background goroutines for every check assignment.
 func (s *Scheduler) Run(ctx context.Context, cfg *model.Config) {
 	var wg sync.WaitGroup
 	for _, assignment := range cfg.LookupMaps.CheckAssignments {
@@ -85,17 +84,17 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 	defer cancel()
 
 	result, err := s.execute(checkCtx, assignment)
-	success := err == nil && result.Status == nrpeclient.StatusOK
+	success := err == nil && result.Status == model.StatusOK
 	output := result.Output
 	if output == "" && err != nil {
 		output = err.Error()
 	}
 	statusForState := result.Status
-	if statusForState == nrpeclient.StatusUnknown {
-		statusForState = nrpeclient.StatusCritical
+	if statusForState == model.StatusUnknown {
+		statusForState = model.StatusCritical
 	}
 	if err != nil {
-		statusForState = nrpeclient.StatusCritical
+		statusForState = model.StatusCritical
 	}
 
 	failCount := 0
@@ -117,7 +116,7 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 		s.logger.Debugf("check ok host=%s check=%s output=%s", assignment.Host.Hostname, assignment.Check.Name, output)
 		if state.alertActive && state.consecutiveSuccess >= assignment.Check.MinSuccessBeforeResolve {
 			if !s.inDowntime(assignment) {
-				s.alerts.Resolve(ctx, assignment, output)
+				s.alerts.Resolve(ctx, assignment, output, result)
 				state.alertActive = false
 			} else {
 				s.logger.Infof("check resolve suppressed due to downtime host=%s check=%s", assignment.Host.Hostname, assignment.Check.Name)
@@ -139,7 +138,7 @@ func (s *Scheduler) executeCheck(ctx context.Context, assignment model.CheckAssi
 	if !state.alertActive {
 		state.alertActive = true
 	}
-	s.alerts.Alert(ctx, assignment, output)
+	s.alerts.Alert(ctx, assignment, output, result)
 
 	return secondsToDuration(assignment.Check.CheckIntervalSec)
 }
@@ -183,9 +182,9 @@ func (s *Scheduler) executePing(ctx context.Context, assignment model.CheckAssig
 	}
 	output, err := s.pinger.Ping(ctx, assignment.Host)
 	if err != nil {
-		return nrpeclient.Result{Output: output, Status: nrpeclient.StatusCritical}, err
+		return nrpeclient.Result{Output: output, Status: model.StatusCritical}, err
 	}
-	return nrpeclient.Result{Output: output, Status: nrpeclient.StatusOK}, nil
+	return nrpeclient.Result{Output: output, Status: model.StatusOK}, nil
 }
 
 func secondsToDuration(value int) time.Duration {

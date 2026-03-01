@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/model"
-	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
 	"go.uber.org/zap"
 )
 
@@ -81,7 +80,7 @@ func NewManager(logger *zap.SugaredLogger, cfg *model.Config) *Manager {
 	return &Manager{hostChecks: hostChecks, hostOrder: hostOrder, logger: logger}
 }
 
-func (m *Manager) Update(assignment model.CheckAssignment, status nrpeclient.Status, output string, failCount int) {
+func (m *Manager) Update(assignment model.CheckAssignment, status model.Status, output string, failCount int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	hostname := assignment.Host.Hostname
@@ -96,7 +95,7 @@ func (m *Manager) Update(assignment model.CheckAssignment, status nrpeclient.Sta
 		info = &CheckInfo{Hostname: hostname, CheckName: checkname}
 		m.hostChecks[hostname][checkname] = info
 	}
-	info.Status = mapStatus(status)
+	info.Status = status
 	info.Output = strings.TrimSpace(output)
 	info.UpdatedAt = time.Now()
 	info.FailCount = failCount
@@ -289,19 +288,6 @@ func (m *Manager) buildHostSummaryFromChecks(hostname string, checks map[string]
 		}
 	}
 	return summary
-}
-
-func mapStatus(status nrpeclient.Status) model.Status {
-	switch status {
-	case nrpeclient.StatusOK:
-		return model.StatusOK
-	case nrpeclient.StatusWarning:
-		return model.StatusWarning
-	case nrpeclient.StatusCritical:
-		return model.StatusCritical
-	default:
-		return model.StatusUnknown
-	}
 }
 
 func buildStatusFilter(statuses []model.Status) map[model.Status]struct{} {

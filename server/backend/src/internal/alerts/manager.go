@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/drunkbatya/drnkexec/internal/model"
+	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
 	"go.uber.org/zap"
 )
 
-// Manager throttles alert notifications and forwards them to a notifier.
 type Manager struct {
 	notifiers      []Notifier
 	logger         *zap.SugaredLogger
@@ -21,7 +21,6 @@ type Manager struct {
 	active    map[string]bool
 }
 
-// NewManager builds a new Manager instance.
 func NewManager(logger *zap.SugaredLogger, notifiers []Notifier, repeatInterval time.Duration) *Manager {
 	filtered := notifiers
 	if len(filtered) == 0 {
@@ -36,19 +35,17 @@ func NewManager(logger *zap.SugaredLogger, notifiers []Notifier, repeatInterval 
 	}
 }
 
-// Alert notifies about a failed check if throttling conditions allow it.
-func (m *Manager) Alert(ctx context.Context, assignment model.CheckAssignment, output string) {
+func (m *Manager) Alert(ctx context.Context, assignment model.CheckAssignment, output string, result nrpeclient.Result) {
 	key := m.keyFor(assignment)
 	if !m.shouldSendAlert(key) {
 		return
 	}
-	text := fmt.Sprintf("[ALERT] host=%s (%s) check=%s command=%s output=%s",
-		assignment.Host.Name, assignment.Host.Hostname, assignment.Check.Name, assignment.Check.Command, output)
+	text := fmt.Sprintf("%s for %s is %s: %s",
+		assignment.Check.Name, assignment.Host.Hostname, result.Status, output)
 	m.dispatch(ctx, assignment, text)
 }
 
-// Resolve reports that a check recovered if the alert was previously active.
-func (m *Manager) Resolve(ctx context.Context, assignment model.CheckAssignment, output string) {
+func (m *Manager) Resolve(ctx context.Context, assignment model.CheckAssignment, output string, result nrpeclient.Result) {
 	key := m.keyFor(assignment)
 
 	m.mu.Lock()

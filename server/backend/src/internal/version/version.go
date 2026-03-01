@@ -4,7 +4,6 @@ import "encoding/json"
 
 const appName = "drnkexec-server"
 
-// Info represents build metadata exposed via CLI and HTTP endpoints.
 type Info struct {
 	Name         string `json:"name"`
 	GitCommit    string `json:"git_commit"`
@@ -15,7 +14,6 @@ type Info struct {
 	Version      string `json:"version"`
 }
 
-// compile-time variables (populated via -ldflags).
 var (
 	gitCommit    string
 	gitBranch    string
@@ -35,7 +33,6 @@ var info = Info{
 	Version:      buildVersion,
 }
 
-// Printable returns the build information as indented JSON.
 func Printable() (string, error) {
 	jsonData, err := json.MarshalIndent(info, "", "    ")
 	if err != nil {
@@ -44,7 +41,6 @@ func Printable() (string, error) {
 	return string(jsonData), nil
 }
 
-// InfoData returns a copy of build metadata for programmatic use.
 func InfoData() Info {
 	return info
 }

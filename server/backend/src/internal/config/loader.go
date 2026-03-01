@@ -23,7 +23,6 @@ const (
 	defaultAdminSessionTTL         = 24 * 60 * 60
 )
 
-// Load reads the YAML config from disk, applies defaults and builds lookup maps.
 func Load(path string) (*model.Config, error) {
 	raw, err := readFile(path)
 	if err != nil {
@@ -290,9 +289,6 @@ func validateConfig(cfg *model.Config) error {
 	}
 	if err := validateAlertManager(&cfg.AlertManager); err != nil {
 		return err
-	}
-	if cfg.AlertManager.Telegram.BotToken == "" || cfg.AlertManager.Telegram.ChatID == "" {
-
 	}
 	if len(cfg.Hosts) == 0 {
 		return fmt.Errorf("config defines no hosts")

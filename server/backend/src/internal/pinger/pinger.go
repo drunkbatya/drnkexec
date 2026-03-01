@@ -15,12 +15,10 @@ const (
 	defaultPingCount   = 1
 )
 
-// Checker runs reachability checks against a host.
 type Checker interface {
 	Ping(ctx context.Context, host *model.HostConfig) (string, error)
 }
 
-// NewChecker builds a ping Checker using the pro-bing ICMP implementation.
 func NewChecker(logger *zap.SugaredLogger) Checker {
 	return &probingChecker{logger: logger}
 }

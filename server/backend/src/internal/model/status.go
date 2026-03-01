@@ -5,10 +5,10 @@ import "strings"
 type Status string
 
 const (
-	StatusOK       Status = "ok"
-	StatusWarning  Status = "warning"
-	StatusCritical Status = "critical"
-	StatusUnknown  Status = "unknown"
+	StatusOK       Status = "OK"
+	StatusWarning  Status = "WARNING"
+	StatusCritical Status = "CRITICAL"
+	StatusUnknown  Status = "UNKNOWN"
 )
 
 var AllStatuses = []Status{StatusOK, StatusWarning, StatusCritical, StatusUnknown}

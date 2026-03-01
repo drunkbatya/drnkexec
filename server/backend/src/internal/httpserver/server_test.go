@@ -12,7 +12,6 @@ import (
 
 	"github.com/drunkbatya/drnkexec/internal/downtime"
 	"github.com/drunkbatya/drnkexec/internal/model"
-	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
 	"github.com/drunkbatya/drnkexec/internal/state"
 	"go.uber.org/zap/zaptest"
 )
@@ -33,7 +32,7 @@ func (s *stubRunner) TriggerCheck(hostname, checkname string) error {
 
 func TestHandleHostsAndChecks(t *testing.T) {
 	srv, assignment, _ := newTestServer(t)
-	srv.state.Update(assignment, nrpeclient.StatusOK, "up", 0)
+	srv.state.Update(assignment, model.StatusOK, "up", 0)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/hosts", nil)
@@ -234,7 +233,7 @@ func TestAppVersion(t *testing.T) {
 
 func TestLoginAndAuthFlow(t *testing.T) {
 	srv, assignment, _ := newTestServer(t)
-	srv.state.Update(assignment, nrpeclient.StatusOK, "up", 0)
+	srv.state.Update(assignment, model.StatusOK, "up", 0)
 	body := bytes.NewBufferString(`{"login":"admin","password":"secret"}`)
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", body)
 	loginRR := httptest.NewRecorder()
@@ -278,7 +277,7 @@ func TestLoginRejectsInvalidCredentials(t *testing.T) {
 
 func TestLogoutClearsSession(t *testing.T) {
 	srv, assignment, _ := newTestServer(t)
-	srv.state.Update(assignment, nrpeclient.StatusOK, "up", 0)
+	srv.state.Update(assignment, model.StatusOK, "up", 0)
 	body := bytes.NewBufferString(`{"login":"admin","password":"secret"}`)
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/user/login", body)
 	loginRR := httptest.NewRecorder()

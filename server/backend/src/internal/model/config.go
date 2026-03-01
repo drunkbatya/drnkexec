@@ -1,6 +1,5 @@
 package model
 
-// Config represents the fully parsed configuration with lookup tables for fast scheduling operations.
 type Config struct {
 	AlertManager AlertManagerConfig
 	Hosts        []HostConfig
@@ -16,20 +15,17 @@ const (
 	CheckTypePing = "ping"
 )
 
-// AlertManagerConfig holds integration options.
 type AlertManagerConfig struct {
 	Notifiers         []string       `yaml:"notifiers"`
 	Telegram          TelegramConfig `yaml:"telegram"`
 	RepeatIntervalSec int            `yaml:"repeat_interval_sec"`
 }
 
-// TelegramConfig is used for Telegram alerting options.
 type TelegramConfig struct {
 	BotToken string `yaml:"bot_token"`
 	ChatID   string `yaml:"chat_id"`
 }
 
-// HostConfig describes a host entry from the configuration.
 type HostConfig struct {
 	Name      string   `yaml:"name"`
 	Hostname  string   `yaml:"hostname"`
@@ -65,7 +61,6 @@ type SchedulerConfig struct {
 	ExecutionTimeoutSec     int `yaml:"execution_timeout_sec"`
 }
 
-// CheckConfig represents a single NRPE check definition.
 type CheckConfig struct {
 	Name                    string   `yaml:"name"`
 	Command                 string   `yaml:"command"`
@@ -92,7 +87,6 @@ type AdminConfig struct {
 	SessionTTL int    `yaml:"session_ttl_sec"`
 }
 
-// LookupMaps houses helper maps for fast lookup during scheduling.
 type LookupMaps struct {
 	ChecksByCheckLabel map[string][]*CheckConfig
 	ChecksByHostname   map[string][]*CheckConfig
@@ -101,7 +95,6 @@ type LookupMaps struct {
 	CheckAssignments   []CheckAssignment
 }
 
-// CheckAssignment binds a check to a host once the config is compiled.
 type CheckAssignment struct {
 	Host  *HostConfig
 	Check *CheckConfig

@@ -10,14 +10,12 @@ import (
 	"time"
 )
 
-// TelegramNotifier posts messages to Telegram via bot API.
 type TelegramNotifier struct {
 	botToken string
 	chatID   string
 	client   *http.Client
 }
 
-// NewTelegramNotifier builds a Telegram notifier instance.
 func NewTelegramNotifier(botToken, chatID string) *TelegramNotifier {
 	if botToken == "" || chatID == "" {
 		return nil
@@ -31,7 +29,6 @@ func NewTelegramNotifier(botToken, chatID string) *TelegramNotifier {
 	}
 }
 
-// Send dispatches a Telegram message.
 func (t *TelegramNotifier) Send(ctx context.Context, message string) error {
 	if t == nil {
 		return fmt.Errorf("telegram notifier is not configured")

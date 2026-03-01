@@ -36,7 +36,7 @@ func TestSchedulerSkipsDuringDowntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("downtime add failed: %v", err)
 	}
-	stub := &stubClient{result: nrpeclient.Result{Status: nrpeclient.StatusOK}}
+	stub := &stubClient{result: nrpeclient.Result{Status: model.StatusOK}}
 	mgr := alerts.NewManager(logger, nil, time.Minute)
 	sched := &Scheduler{logger: logger, client: stub, alerts: mgr, pinger: nil, state: state.NewManager(logger, &model.Config{}), downtime: dt}
 	next := sched.executeCheck(context.Background(), assignment, &assignmentState{})
@@ -55,7 +55,7 @@ func TestSchedulerRunsWhenNoDowntime(t *testing.T) {
 	host := &model.HostConfig{Name: "h", Hostname: "h"}
 	check := &model.CheckConfig{Name: "c", Command: "cmd", ExecutionTimeoutSec: 1, CheckIntervalSec: 1, RetryIntervalSec: 1, MinFailBeforeAlert: 1, MinSuccessBeforeResolve: 1}
 	assignment := model.CheckAssignment{Host: host, Check: check}
-	stub := &stubClient{result: nrpeclient.Result{Status: nrpeclient.StatusOK}}
+	stub := &stubClient{result: nrpeclient.Result{Status: model.StatusOK}}
 	mgr := alerts.NewManager(logger, nil, time.Minute)
 	sched := &Scheduler{logger: logger, client: stub, alerts: mgr, pinger: nil, state: state.NewManager(logger, &model.Config{}), downtime: downtime.NewManager(logger)}
 	sched.executeCheck(context.Background(), assignment, &assignmentState{})

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/drunkbatya/drnkexec/internal/model"
-	"github.com/drunkbatya/drnkexec/internal/nrpeclient"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -30,7 +29,7 @@ func TestManagerUpdateAndQueries(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar()
 	m := NewManager(logger, cfg)
 	assignment := cfg.LookupMaps.CheckAssignments[0]
-	m.Update(assignment, nrpeclient.StatusWarning, " some output \n", 2)
+	m.Update(assignment, model.StatusWarning, " some output \n", 2)
 
 	info, ok := m.Check("alpha", "check-alpha")
 	if !ok {
@@ -75,8 +74,8 @@ func TestCheckSummaries(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar()
 	m := NewManager(logger, cfg)
 	assignments := cfg.LookupMaps.CheckAssignments
-	m.Update(assignments[0], nrpeclient.StatusCritical, "bad", 1)
-	m.Update(assignments[1], nrpeclient.StatusOK, "ok", 0)
+	m.Update(assignments[0], model.StatusCritical, "bad", 1)
+	m.Update(assignments[1], model.StatusOK, "ok", 0)
 
 	summaries := m.CheckSummaries()
 	if len(summaries) != 2 {
@@ -102,8 +101,8 @@ func TestCheckSummariesStatusFilter(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar()
 	m := NewManager(logger, cfg)
 	assignments := cfg.LookupMaps.CheckAssignments
-	m.Update(assignments[0], nrpeclient.StatusCritical, "bad", 1)
-	m.Update(assignments[1], nrpeclient.StatusOK, "ok", 0)
+	m.Update(assignments[0], model.StatusCritical, "bad", 1)
+	m.Update(assignments[1], model.StatusOK, "ok", 0)
 
 	critical := m.CheckSummariesFiltered("", []model.Status{model.StatusCritical})
 	if len(critical) != 1 || critical[0].CheckName != "check-alpha" {
@@ -121,8 +120,8 @@ func TestHostSummariesStatusFilter(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar()
 	m := NewManager(logger, cfg)
 	assignments := cfg.LookupMaps.CheckAssignments
-	m.Update(assignments[0], nrpeclient.StatusCritical, "bad", 1)
-	m.Update(assignments[1], nrpeclient.StatusOK, "ok", 0)
+	m.Update(assignments[0], model.StatusCritical, "bad", 1)
+	m.Update(assignments[1], model.StatusOK, "ok", 0)
 
 	criticalOnly := m.HostSummariesFiltered("", []model.Status{model.StatusCritical})
 	if len(criticalOnly) != 1 || criticalOnly[0].Hostname != "alpha" {
@@ -140,8 +139,8 @@ func TestChecksStatusFilter(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar()
 	m := NewManager(logger, cfg)
 	assignments := cfg.LookupMaps.CheckAssignments
-	m.Update(assignments[0], nrpeclient.StatusCritical, "bad", 1)
-	m.Update(assignments[1], nrpeclient.StatusOK, "ok", 0)
+	m.Update(assignments[0], model.StatusCritical, "bad", 1)
+	m.Update(assignments[1], model.StatusOK, "ok", 0)
 
 	checks, ok := m.Checks("", []model.Status{model.StatusCritical})
 	if !ok || len(checks) != 1 || checks[0].Hostname != "alpha" {

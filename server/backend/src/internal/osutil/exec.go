@@ -5,7 +5,6 @@ import (
 	"os/exec"
 )
 
-// ExitCodeFromError extracts the exit code from an exec error or returns the exec error itself.
 func ExitCodeFromError(err error) (int, error) {
 	if err == nil {
 		return 0, nil

@@ -14,18 +14,9 @@ import (
 	"go.uber.org/zap"
 )
 
-type Status int
-
-const (
-	StatusOK Status = iota
-	StatusWarning
-	StatusCritical
-	StatusUnknown
-)
-
 type Result struct {
 	Output string
-	Status Status
+	Status model.Status
 }
 
 type Client interface {
@@ -74,7 +65,7 @@ func (c *client) Execute(ctx context.Context, host *model.HostConfig, check *mod
 	}
 	output := protocol.PayloadString(parsed)
 	status := mapStatus(parsed.Result)
-	c.logger.Debugf("nrpe executed host=%s check=%s status=%d output=%s", host.Hostname, check.Name, status, output)
+	c.logger.Debugf("nrpe executed host=%s check=%s status=%s output=%s", host.Hostname, check.Name, status, output)
 	return Result{Output: output, Status: status}, nil
 }
 
@@ -113,15 +104,15 @@ func (c *client) readResponse(conn net.Conn) (protocol.Packet, error) {
 	return protocol.ParseResponse(packetBytes)
 }
 
-func mapStatus(s protocol.Status) Status {
+func mapStatus(s protocol.Status) model.Status {
 	switch s {
 	case protocol.StatusOK:
-		return StatusOK
+		return model.StatusOK
 	case protocol.StatusWarning:
-		return StatusWarning
+		return model.StatusWarning
 	case protocol.StatusCritical:
-		return StatusCritical
+		return model.StatusCritical
 	default:
-		return StatusUnknown
+		return model.StatusUnknown
 	}
 }
