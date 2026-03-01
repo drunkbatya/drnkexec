@@ -75,7 +75,7 @@ docker:
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		--build-arg BUILD_TIME=$(BUILD_TIME) \
 		--build-arg BUILD_VERSION=$(BUILD_VERSION) \
-		-t ghcr.io/drunkbatya/drnkexec-server:$(BUILD_VERSION) \
+		-t ghcr.io/drunkbatya/drnkexec-server-backend:$(BUILD_VERSION) \
 		-f Dockerfile \
 		--load \
 		.
