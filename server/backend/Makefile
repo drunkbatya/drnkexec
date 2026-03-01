@@ -77,4 +77,5 @@ docker:
 		--build-arg BUILD_VERSION=$(BUILD_VERSION) \
 		-t ghcr.io/drunkbatya/drnkexec-server:$(BUILD_VERSION) \
 		-f Dockerfile \
+		--load \
 		.
