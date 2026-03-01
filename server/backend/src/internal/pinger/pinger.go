@@ -43,7 +43,6 @@ func (p *probingChecker) Ping(ctx context.Context, host *model.HostConfig) (stri
 	pinger.Count = defaultPingCount
 	pinger.Timeout = defaultPingTimeout
 	pinger.Interval = defaultPingTimeout
-	pinger.SetPrivileged(false)
 
 	runErr := make(chan error, 1)
 	go func() {
